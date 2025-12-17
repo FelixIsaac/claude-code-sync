@@ -1,0 +1,9 @@
+# Handle line endings automatically for files detected as text
+* text=auto
+
+# Force bash scripts to always use LF
+*.sh text eol=lf
+claude-code-sync text eol=lf
+
+# Force PowerShell to use CRLF on Windows checkout
+*.ps1 text eol=crlf

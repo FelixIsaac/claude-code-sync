@@ -1,0 +1,610 @@
+#!/usr/bin/env bash
+# claude-code-sync - Secure Claude Code config sync across machines
+# https://github.com/felixisaac/claude-code-sync
+set -euo pipefail
+
+VERSION="1.0.0"
+
+# Directories
+CLAUDE_DIR="$HOME/.claude"
+CLAUDE_JSON="$HOME/.claude.json"
+SYNC_DIR="$HOME/.claude-sync"
+CONFIG_FILE="$SYNC_DIR/config"
+KEY_FILE="$SYNC_DIR/identity.key"
+REPO_DIR="$SYNC_DIR/repo"
+BACKUP_DIR="$SYNC_DIR/backups"
+LOCK_FILE="$SYNC_DIR/.lock"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Files to encrypt (contain secrets)
+ENCRYPT_PATTERNS=(
+    "settings.json"
+    "settings.local.json"
+    "claude.json"
+    "skills/*/resources/*"
+)
+
+# Files/dirs to exclude from sync
+EXCLUDE_PATTERNS=(
+    "plans"
+    "*.log"
+    "*.tmp"
+    ".git"
+    "*.local-backup-*"
+    "sessionStorage"
+    "*.cache"
+    "projects"
+)
+
+#--- Utility Functions ---#
+
+log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
+
+die() { log_error "$1"; exit 1; }
+
+check_deps() {
+    local missing=()
+    command -v git &>/dev/null || missing+=("git")
+    command -v age &>/dev/null || missing+=("age")
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        die "Missing dependencies: ${missing[*]}. Please install them first."
+    fi
+}
+
+acquire_lock() {
+    if [[ -f "$LOCK_FILE" ]]; then
+        local pid
+        pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            die "Another claude-code-sync process is running (PID: $pid)"
+        fi
+        rm -f "$LOCK_FILE"
+    fi
+    echo $$ > "$LOCK_FILE"
+    trap 'rm -f "$LOCK_FILE"' EXIT
+}
+
+release_lock() {
+    rm -f "$LOCK_FILE"
+}
+
+get_public_key() {
+    grep -o 'age1[a-z0-9]*' "$KEY_FILE" 2>/dev/null | head -1
+}
+
+should_encrypt() {
+    local file="$1"
+    local relpath="${file#$CLAUDE_DIR/}"
+
+    # Check against encrypt patterns
+    for pattern in "${ENCRYPT_PATTERNS[@]}"; do
+        # shellcheck disable=SC2053
+        if [[ "$relpath" == $pattern ]] || [[ "$(basename "$relpath")" == "$pattern" ]]; then
+            return 0
+        fi
+    done
+
+    # Also encrypt claude.json (separate file)
+    if [[ "$file" == "$CLAUDE_JSON" ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+should_exclude() {
+    local file="$1"
+    local relpath="${file#$CLAUDE_DIR/}"
+
+    for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+        # shellcheck disable=SC2053
+        if [[ "$relpath" == $pattern* ]] || [[ "$(basename "$relpath")" == $pattern ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+ensure_dir() {
+    [[ -d "$1" ]] || mkdir -p "$1"
+}
+
+get_timestamp() {
+    date +"%Y%m%d-%H%M%S"
+}
+
+compute_checksum() {
+    local file="$1"
+    if command -v sha256sum &>/dev/null; then
+        sha256sum "$file" | cut -d' ' -f1
+    elif command -v shasum &>/dev/null; then
+        shasum -a 256 "$file" | cut -d' ' -f1
+    else
+        die "No SHA256 tool found"
+    fi
+}
+
+#--- Commands ---#
+
+cmd_init() {
+    local repo_url="${1:-}"
+
+    log_info "Initializing claude-code-sync..."
+    check_deps
+
+    # Create sync directory
+    ensure_dir "$SYNC_DIR"
+    ensure_dir "$BACKUP_DIR"
+
+    # Generate age keypair if not exists
+    if [[ -f "$KEY_FILE" ]]; then
+        log_warn "Key already exists at $KEY_FILE"
+        log_info "Public key: $(get_public_key)"
+    else
+        log_info "Generating age keypair..."
+        age-keygen -o "$KEY_FILE" 2>&1
+        chmod 600 "$KEY_FILE"
+
+        echo ""
+        echo -e "${RED}========================================${NC}"
+        echo -e "${RED}   IMPORTANT: SAVE YOUR PRIVATE KEY!   ${NC}"
+        echo -e "${RED}========================================${NC}"
+        echo ""
+        echo "Your private key (save this securely, you'll need it on other machines):"
+        echo ""
+        cat "$KEY_FILE"
+        echo ""
+        echo -e "${YELLOW}This key will NOT be shown again!${NC}"
+        echo -e "${YELLOW}Store it in a password manager or secure location.${NC}"
+        echo ""
+    fi
+
+    # Setup repo
+    if [[ -n "$repo_url" ]]; then
+        if [[ -d "$REPO_DIR" ]]; then
+            log_warn "Repo already exists at $REPO_DIR"
+        else
+            log_info "Cloning repo..."
+            git clone "$repo_url" "$REPO_DIR"
+        fi
+        echo "repo_url=$repo_url" > "$CONFIG_FILE"
+    else
+        if [[ ! -d "$REPO_DIR" ]]; then
+            log_info "Creating local repo (you'll need to add a remote later)..."
+            mkdir -p "$REPO_DIR"
+            git -C "$REPO_DIR" init
+            echo "# Claude Code Sync" > "$REPO_DIR/README.md"
+            git -C "$REPO_DIR" add README.md
+            git -C "$REPO_DIR" commit -m "Initial commit"
+        fi
+        echo ""
+        log_info "No repo URL provided. To add a remote later:"
+        echo "  git -C $REPO_DIR remote add origin <your-repo-url>"
+        echo "  claude-code-sync push"
+    fi
+
+    log_success "Initialization complete!"
+}
+
+cmd_push() {
+    local force="${1:-}"
+
+    check_deps
+    acquire_lock
+
+    if [[ ! -f "$KEY_FILE" ]]; then
+        die "Not initialized. Run 'claude-code-sync init' first."
+    fi
+
+    if [[ ! -d "$CLAUDE_DIR" ]]; then
+        die "No ~/.claude directory found. Nothing to sync."
+    fi
+
+    log_info "Syncing files to repo..."
+
+    local public_key
+    public_key=$(get_public_key)
+
+    # Process ~/.claude directory
+    local count=0
+    while IFS= read -r -d '' file; do
+        local relpath="${file#$CLAUDE_DIR/}"
+        local dest="$REPO_DIR/$relpath"
+
+        # Skip excluded files
+        if should_exclude "$file"; then
+            continue
+        fi
+
+        # Create parent directory
+        ensure_dir "$(dirname "$dest")"
+
+        # Encrypt or copy
+        if should_encrypt "$file"; then
+            log_info "Encrypting: $relpath"
+            age -e -r "$public_key" -o "${dest}.age" "$file"
+        else
+            log_info "Copying: $relpath"
+            cp "$file" "$dest"
+        fi
+        ((count++))
+    done < <(find "$CLAUDE_DIR" -type f -print0 2>/dev/null)
+
+    # Also sync ~/.claude.json if it exists
+    if [[ -f "$CLAUDE_JSON" ]]; then
+        log_info "Encrypting: claude.json"
+        age -e -r "$public_key" -o "$REPO_DIR/claude.json.age" "$CLAUDE_JSON"
+        ((count++))
+    fi
+
+    # Generate manifest
+    log_info "Generating manifest..."
+    local manifest="$REPO_DIR/.sync-manifest"
+    echo "# claude-code-sync manifest - $(date -Iseconds)" > "$manifest"
+    echo "# Format: checksum  path" >> "$manifest"
+
+    while IFS= read -r -d '' file; do
+        local relpath="${file#$REPO_DIR/}"
+        [[ "$relpath" == ".git"* ]] && continue
+        [[ "$relpath" == ".sync-manifest" ]] && continue
+        local checksum
+        checksum=$(compute_checksum "$file")
+        echo "$checksum  $relpath" >> "$manifest"
+    done < <(find "$REPO_DIR" -type f -print0 2>/dev/null)
+
+    # Git commit and push
+    log_info "Committing changes..."
+    git -C "$REPO_DIR" add -A
+
+    if git -C "$REPO_DIR" diff --cached --quiet; then
+        log_info "No changes to commit."
+    else
+        git -C "$REPO_DIR" commit -m "Sync $(get_timestamp)"
+
+        if git -C "$REPO_DIR" remote | grep -q origin; then
+            log_info "Pushing to remote..."
+            git -C "$REPO_DIR" push origin HEAD
+            log_success "Pushed $count files to remote."
+        else
+            log_warn "No remote configured. Changes committed locally only."
+            log_info "Add a remote with: git -C $REPO_DIR remote add origin <url>"
+        fi
+    fi
+
+    release_lock
+    log_success "Push complete!"
+}
+
+cmd_pull() {
+    local force="${1:-}"
+
+    check_deps
+    acquire_lock
+
+    if [[ ! -f "$KEY_FILE" ]]; then
+        die "Not initialized. Run 'claude-code-sync init' or 'claude-code-sync import-key' first."
+    fi
+
+    if [[ ! -d "$REPO_DIR" ]]; then
+        die "No repo found. Run 'claude-code-sync init <repo-url>' first."
+    fi
+
+    # Pull from remote
+    if git -C "$REPO_DIR" remote | grep -q origin; then
+        log_info "Pulling from remote..."
+        git -C "$REPO_DIR" pull origin HEAD
+    fi
+
+    # Backup current config
+    if [[ -d "$CLAUDE_DIR" ]]; then
+        local backup_path="$BACKUP_DIR/backup-$(get_timestamp).tar.gz"
+        log_info "Backing up current config to $backup_path..."
+        tar -czf "$backup_path" -C "$HOME" .claude .claude.json 2>/dev/null || true
+
+        # Keep only last 5 backups
+        ls -t "$BACKUP_DIR"/backup-*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm -f
+    fi
+
+    ensure_dir "$CLAUDE_DIR"
+
+    # Process files from repo
+    log_info "Restoring files..."
+    local count=0
+
+    while IFS= read -r -d '' file; do
+        local relpath="${file#$REPO_DIR/}"
+
+        # Skip git and manifest
+        [[ "$relpath" == ".git"* ]] && continue
+        [[ "$relpath" == ".sync-manifest" ]] && continue
+        [[ "$relpath" == "README.md" ]] && continue
+
+        local dest
+        local actual_relpath="$relpath"
+
+        # Handle encrypted files
+        if [[ "$relpath" == *.age ]]; then
+            actual_relpath="${relpath%.age}"
+
+            # Special case for claude.json (goes to home dir)
+            if [[ "$actual_relpath" == "claude.json" ]]; then
+                dest="$CLAUDE_JSON"
+            else
+                dest="$CLAUDE_DIR/$actual_relpath"
+            fi
+
+            # Backup existing file if different
+            if [[ -f "$dest" ]]; then
+                local existing_content new_content
+                existing_content=$(cat "$dest" 2>/dev/null || echo "")
+                new_content=$(age -d -i "$KEY_FILE" "$file" 2>/dev/null || echo "")
+
+                if [[ "$existing_content" != "$new_content" ]]; then
+                    local backup_name="${dest}.local-backup-$(get_timestamp)"
+                    log_warn "Conflict: backing up $actual_relpath to $backup_name"
+                    cp "$dest" "$backup_name"
+                fi
+            fi
+
+            log_info "Decrypting: $actual_relpath"
+            ensure_dir "$(dirname "$dest")"
+            age -d -i "$KEY_FILE" -o "$dest" "$file"
+        else
+            dest="$CLAUDE_DIR/$relpath"
+
+            # Backup existing file if different
+            if [[ -f "$dest" ]]; then
+                if ! diff -q "$file" "$dest" &>/dev/null; then
+                    local backup_name="${dest}.local-backup-$(get_timestamp)"
+                    log_warn "Conflict: backing up $relpath to $backup_name"
+                    cp "$dest" "$backup_name"
+                fi
+            fi
+
+            log_info "Copying: $relpath"
+            ensure_dir "$(dirname "$dest")"
+            cp "$file" "$dest"
+        fi
+        ((count++))
+    done < <(find "$REPO_DIR" -type f -print0 2>/dev/null)
+
+    release_lock
+    log_success "Pull complete! Restored $count files."
+}
+
+cmd_status() {
+    check_deps
+
+    if [[ ! -d "$REPO_DIR" ]]; then
+        die "No repo found. Run 'claude-code-sync init' first."
+    fi
+
+    echo "=== claude-code-sync status ==="
+    echo ""
+
+    # Check remote status
+    if git -C "$REPO_DIR" remote | grep -q origin; then
+        git -C "$REPO_DIR" fetch origin 2>/dev/null || true
+        local local_commit remote_commit
+        local_commit=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo "none")
+        remote_commit=$(git -C "$REPO_DIR" rev-parse origin/HEAD 2>/dev/null || echo "none")
+
+        if [[ "$local_commit" == "$remote_commit" ]]; then
+            echo -e "${GREEN}Remote:${NC} Up to date"
+        else
+            echo -e "${YELLOW}Remote:${NC} Out of sync (local: ${local_commit:0:7}, remote: ${remote_commit:0:7})"
+        fi
+    else
+        echo -e "${YELLOW}Remote:${NC} Not configured"
+    fi
+
+    echo ""
+    echo "Local files in ~/.claude:"
+    if [[ -d "$CLAUDE_DIR" ]]; then
+        find "$CLAUDE_DIR" -type f 2>/dev/null | while read -r f; do
+            local relpath="${f#$CLAUDE_DIR/}"
+            if should_exclude "$f"; then
+                echo -e "  ${YELLOW}[excluded]${NC} $relpath"
+            elif should_encrypt "$f"; then
+                echo -e "  ${BLUE}[encrypted]${NC} $relpath"
+            else
+                echo -e "  ${GREEN}[plain]${NC} $relpath"
+            fi
+        done
+    else
+        echo "  (none)"
+    fi
+
+    if [[ -f "$CLAUDE_JSON" ]]; then
+        echo -e "  ${BLUE}[encrypted]${NC} ~/.claude.json"
+    fi
+
+    echo ""
+    echo "Repo files in $REPO_DIR:"
+    find "$REPO_DIR" -type f 2>/dev/null | while read -r f; do
+        local relpath="${f#$REPO_DIR/}"
+        [[ "$relpath" == ".git"* ]] && continue
+        if [[ "$relpath" == *.age ]]; then
+            echo -e "  ${BLUE}[encrypted]${NC} $relpath"
+        else
+            echo -e "  ${GREEN}[plain]${NC} $relpath"
+        fi
+    done
+}
+
+cmd_import_key() {
+    ensure_dir "$SYNC_DIR"
+
+    if [[ -f "$KEY_FILE" ]]; then
+        log_warn "Key already exists at $KEY_FILE"
+        read -rp "Overwrite? (y/N) " confirm
+        [[ "$confirm" =~ ^[Yy]$ ]] || die "Aborted."
+    fi
+
+    echo "Paste your age private key (starts with AGE-SECRET-KEY-):"
+    echo "Press Ctrl+D when done."
+    echo ""
+
+    local key_content
+    key_content=$(cat)
+
+    # Validate key format
+    if [[ ! "$key_content" =~ AGE-SECRET-KEY- ]]; then
+        die "Invalid key format. Key must start with AGE-SECRET-KEY-"
+    fi
+
+    echo "$key_content" > "$KEY_FILE"
+    chmod 600 "$KEY_FILE"
+
+    log_success "Key imported successfully!"
+    log_info "Public key: $(get_public_key)"
+}
+
+cmd_export_key() {
+    if [[ ! -f "$KEY_FILE" ]]; then
+        die "No key found. Run 'claude-code-sync init' first."
+    fi
+
+    echo ""
+    echo -e "${YELLOW}=== Your Private Key ===${NC}"
+    echo ""
+    cat "$KEY_FILE"
+    echo ""
+    echo -e "${YELLOW}Keep this secure!${NC}"
+}
+
+cmd_verify() {
+    check_deps
+
+    if [[ ! -f "$REPO_DIR/.sync-manifest" ]]; then
+        die "No manifest found. Run 'claude-code-sync push' first."
+    fi
+
+    log_info "Verifying file integrity..."
+    local errors=0
+
+    while IFS= read -r line; do
+        [[ "$line" =~ ^# ]] && continue
+        [[ -z "$line" ]] && continue
+
+        local expected_checksum file_path
+        expected_checksum=$(echo "$line" | cut -d' ' -f1)
+        file_path=$(echo "$line" | cut -d' ' -f3-)
+
+        local full_path="$REPO_DIR/$file_path"
+
+        if [[ ! -f "$full_path" ]]; then
+            log_error "Missing: $file_path"
+            ((errors++))
+            continue
+        fi
+
+        local actual_checksum
+        actual_checksum=$(compute_checksum "$full_path")
+
+        if [[ "$expected_checksum" != "$actual_checksum" ]]; then
+            log_error "Checksum mismatch: $file_path"
+            ((errors++))
+        else
+            log_success "OK: $file_path"
+        fi
+    done < "$REPO_DIR/.sync-manifest"
+
+    echo ""
+    if [[ $errors -eq 0 ]]; then
+        log_success "All files verified!"
+    else
+        die "$errors file(s) failed verification."
+    fi
+}
+
+cmd_version() {
+    echo "claude-code-sync v$VERSION"
+}
+
+cmd_help() {
+    cat << 'EOF'
+claude-code-sync - Secure Claude Code config sync across machines
+
+USAGE:
+    claude-code-sync <command> [options]
+
+COMMANDS:
+    init [repo-url]    Initialize sync (generate keys, clone/create repo)
+    push               Encrypt and push configs to GitHub
+    pull               Pull and decrypt configs from GitHub
+    status             Show sync status
+    import-key         Import private key on new machine
+    export-key         Display private key for backup
+    verify             Verify file integrity
+    version            Show version
+    help               Show this help
+
+FIRST TIME SETUP:
+    1. claude-code-sync init
+    2. Save the displayed private key securely!
+    3. Create a private GitHub repo
+    4. git -C ~/.claude-sync/repo remote add origin <repo-url>
+    5. claude-code-sync push
+
+NEW MACHINE SETUP:
+    1. Install: curl -fsSL https://raw.githubusercontent.com/felixisaac/claude-code-sync/main/install.sh | bash
+    2. claude-code-sync import-key  (paste your saved private key)
+    3. claude-code-sync init <repo-url>
+    4. claude-code-sync pull
+
+WHAT GETS SYNCED:
+    Plain (readable in GitHub):
+        - CLAUDE.md
+        - commands/*.md
+        - agents/*.md
+        - skills/*/SKILL.md
+        - hooks/hooks.json
+
+    Encrypted (.age files):
+        - settings.json (may contain API keys)
+        - settings.local.json
+        - ~/.claude.json (OAuth tokens, MCP configs)
+        - skills/*/resources/*
+
+    Excluded (not synced):
+        - plans/
+        - *.log, *.tmp, *.cache
+        - projects/
+
+MORE INFO:
+    https://github.com/felixisaac/claude-code-sync
+EOF
+}
+
+#--- Main ---#
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+
+    case "$cmd" in
+        init)       cmd_init "$@" ;;
+        push)       cmd_push "$@" ;;
+        pull)       cmd_pull "$@" ;;
+        status)     cmd_status "$@" ;;
+        import-key) cmd_import_key "$@" ;;
+        export-key) cmd_export_key "$@" ;;
+        verify)     cmd_verify "$@" ;;
+        version|-v|--version) cmd_version ;;
+        help|-h|--help) cmd_help ;;
+        *)          die "Unknown command: $cmd. Run 'claude-code-sync help' for usage." ;;
+    esac
+}
+
+main "$@"
