@@ -45,7 +45,11 @@ $EXCLUDE_PATTERNS = @(
     "*.local-backup-*",
     "sessionStorage",
     "*.cache",
-    "projects"
+    "projects",
+    "local",
+    "statsig",
+    "history.jsonl",
+    "todos"
 )
 
 #--- Utility Functions ---#

@@ -17,28 +17,45 @@ Secure cross-platform CLI to sync [Claude Code](https://claude.com/claude-code) 
 - Conflict detection with local backup
 - SHA256 integrity verification
 
-## Quick Start
+## Prerequisites
 
-### Installation
+### age (encryption tool)
+
+**[age](https://github.com/FiloSottile/age)** is a simple, modern file encryption tool. claude-code-sync uses it to encrypt your sensitive files (API keys, OAuth tokens) before pushing to GitHub.
+
+```
+settings.json (contains secrets) → age encrypts → settings.json.age (unreadable) → GitHub
+```
+
+**Install age:**
+
+| Platform | Command |
+|----------|---------|
+| macOS | `brew install age` |
+| Ubuntu/Debian | `sudo apt install age` |
+| Windows (scoop) | `scoop install age` |
+| Windows (winget) | `winget install FiloSottile.age` |
+| Manual | [Download from releases](https://github.com/FiloSottile/age/releases) |
+
+### git
+
+You'll also need `git` installed (you probably already have it).
+
+## Installation
+
+The install script downloads `claude-code-sync` to `~/.local/bin/` and adds it to your PATH.
 
 **macOS/Linux:**
 ```bash
-# Install age first
-brew install age  # macOS
-# or: sudo apt install age  # Ubuntu/Debian
-
-# Install claude-code-sync
 curl -fsSL https://raw.githubusercontent.com/felixisaac/claude-code-sync/main/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 ```powershell
-# Install age first
-scoop install age  # or: winget install FiloSottile.age
-
-# Install claude-code-sync
 irm https://raw.githubusercontent.com/felixisaac/claude-code-sync/main/install.ps1 | iex
 ```
+
+**Manual installation:** You can also just download `claude-code-sync` (Unix) or `claude-code-sync.ps1` (Windows) directly and put it somewhere in your PATH.
 
 ### First Time Setup
 
@@ -97,12 +114,16 @@ claude-code-sync pull
 ### Encrypted (.age files)
 - `settings.json` - May contain API keys in `env`
 - `settings.local.json` - User overrides
-- `~/.claude.json` - OAuth tokens, MCP server configs
+- `~/.claude.json` - OAuth tokens, MCP server configs (separate file at home dir, not inside ~/.claude/)
 - `skills/*/resources/*` - May contain credentials
 
 ### Excluded (not synced)
 - `plans/` - Temporary plan files
 - `projects/` - Project-specific state
+- `local/` - Node.js dependencies and binaries (~176MB)
+- `statsig/` - Analytics/telemetry data
+- `history.jsonl` - Conversation history index
+- `todos/` - Session-specific todo files
 - `*.log`, `*.tmp`, `*.cache`
 
 ## Security

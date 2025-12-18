@@ -40,6 +40,10 @@ EXCLUDE_PATTERNS=(
     "sessionStorage"
     "*.cache"
     "projects"
+    "local"
+    "statsig"
+    "history.jsonl"
+    "todos"
 )
 
 #--- Utility Functions ---#
