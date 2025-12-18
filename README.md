@@ -144,22 +144,65 @@ claude-code-sync pull
 2. **Backup your age key** - Store in a password manager
 3. **Don't share your key** - Each team member should have their own key
 
-## Architecture
+## How It Works
+
+```mermaid
+flowchart LR
+    subgraph Machine1["Machine 1 (Desktop)"]
+        C1[~/.claude/]
+        S1[claude-code-sync]
+    end
+
+    subgraph GitHub["GitHub (Private Repo)"]
+        P[Plain: CLAUDE.md, commands/]
+        E[Encrypted: settings.json.age]
+        M[.sync-manifest]
+    end
+
+    subgraph Machine2["Machine 2 (Laptop/SSH)"]
+        C2[~/.claude/]
+        S2[claude-code-sync]
+    end
+
+    C1 -->|"push (encrypt)"| S1
+    S1 -->|git push| GitHub
+    GitHub -->|git pull| S2
+    S2 -->|"pull (decrypt)"| C2
+```
+
+**Push flow:**
+1. Read files from `~/.claude/`
+2. Encrypt sensitive files (settings, tokens) with your age public key
+3. Copy non-sensitive files as-is (CLAUDE.md, commands)
+4. Generate SHA256 manifest for integrity
+5. Git commit & push to GitHub
+
+**Pull flow:**
+1. Git pull from GitHub
+2. Backup current `~/.claude/` (in case of conflicts)
+3. Decrypt `.age` files with your age private key
+4. Copy plain files as-is
+5. Verify checksums
+
+### Directory Structure
 
 ```
-~/.claude-sync/
-├── config              # Repo URL
-├── identity.key        # age private key (chmod 600)
-├── backups/            # Auto backups before pull
-└── repo/               # Git clone
+~/.claude-sync/           # Local sync data (created by init)
+├── config                # Repo URL
+├── identity.key          # age private key (chmod 600, KEEP SECRET!)
+├── backups/              # Auto backups before pull
+└── repo/                 # Git clone of your config repo
 
-GitHub repo:
-├── CLAUDE.md           # Plain
-├── commands/*.md       # Plain
-├── agents/*.md         # Plain
-├── settings.json.age   # Encrypted
-├── claude.json.age     # Encrypted
-└── .sync-manifest      # Checksums
+GitHub repo:              # What gets pushed
+├── CLAUDE.md             # Plain
+├── commands/*.md         # Plain
+├── agents/*.md           # Plain
+├── skills/*/SKILL.md     # Plain
+├── hooks/hooks.json      # Plain
+├── settings.json.age     # Encrypted
+├── settings.local.json.age # Encrypted
+├── claude.json.age       # Encrypted (~/.claude.json)
+└── .sync-manifest        # SHA256 checksums
 ```
 
 ## FAQ
