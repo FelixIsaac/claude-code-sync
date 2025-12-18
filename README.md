@@ -100,6 +100,9 @@ claude-code-sync pull
 | `import-key` | Import private key on new machine |
 | `export-key` | Display private key for backup |
 | `verify` | Verify file integrity |
+| `reset` | Delete all sync data (⚠️ deletes key!) |
+| `reset --keep-key` | Reset but preserve your private key |
+| `unlink` | Disconnect from remote repo (keep local data) |
 | `help` | Show help |
 
 ## What Gets Synced

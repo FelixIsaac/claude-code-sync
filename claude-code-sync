@@ -538,6 +538,67 @@ cmd_verify() {
     fi
 }
 
+cmd_reset() {
+    local keep_key=false
+    for arg in "$@"; do
+        [[ "$arg" == "--keep-key" || "$arg" == "-k" ]] && keep_key=true
+    done
+
+    if [[ ! -d "$SYNC_DIR" ]]; then
+        log_info "Nothing to reset - ~/.claude-sync does not exist."
+        return
+    fi
+
+    echo ""
+    echo -e "${YELLOW}This will delete:${NC}"
+    if $keep_key; then
+        echo "  - $REPO_DIR (local repo)"
+        echo "  - $CONFIG_FILE (config)"
+        echo "  - $BACKUP_DIR (backups)"
+        echo ""
+        echo -e "${GREEN}Your key will be PRESERVED at $KEY_FILE${NC}"
+    else
+        echo -e "  ${RED}- $SYNC_DIR (everything including your private key!)${NC}"
+        echo ""
+        echo -e "${RED}WARNING: If you haven't backed up your key, you will lose access${NC}"
+        echo -e "${RED}to any encrypted configs in your repo!${NC}"
+    fi
+    echo ""
+
+    read -rp "Type 'yes' to confirm: " confirm
+    if [[ "$confirm" != "yes" ]]; then
+        log_info "Aborted."
+        return
+    fi
+
+    if $keep_key; then
+        [[ -d "$REPO_DIR" ]] && rm -rf "$REPO_DIR"
+        [[ -f "$CONFIG_FILE" ]] && rm -f "$CONFIG_FILE"
+        [[ -d "$BACKUP_DIR" ]] && rm -rf "$BACKUP_DIR"
+        [[ -f "$LOCK_FILE" ]] && rm -f "$LOCK_FILE"
+        log_success "Reset complete. Key preserved. Run 'claude-code-sync init <repo-url>' to reconnect."
+    else
+        rm -rf "$SYNC_DIR"
+        log_success "Reset complete. All sync data removed."
+    fi
+}
+
+cmd_unlink() {
+    if [[ ! -d "$REPO_DIR" ]]; then
+        log_info "No repo linked."
+        return
+    fi
+
+    if git -C "$REPO_DIR" remote | grep -q origin; then
+        git -C "$REPO_DIR" remote remove origin
+        [[ -f "$CONFIG_FILE" ]] && rm -f "$CONFIG_FILE"
+        log_success "Unlinked from remote. Local repo preserved at $REPO_DIR"
+        log_info "To link to a new repo: git -C $REPO_DIR remote add origin <new-url>"
+    else
+        log_info "No remote configured."
+    fi
+}
+
 cmd_version() {
     echo "claude-code-sync v$VERSION"
 }
@@ -557,6 +618,9 @@ COMMANDS:
     import-key         Import private key on new machine
     export-key         Display private key for backup
     verify             Verify file integrity
+    reset              Delete all sync data (WARNING: deletes key!)
+    reset --keep-key   Reset but preserve your private key
+    unlink             Disconnect from remote repo (keep local data)
     version            Show version
     help               Show this help
 
@@ -611,6 +675,9 @@ main() {
         import-key) cmd_import_key "$@" ;;
         export-key) cmd_export_key "$@" ;;
         verify)     cmd_verify "$@" ;;
+        reset)      cmd_reset "$@" ;;
+        destroy)    cmd_reset "$@" ;;  # Alias for reset
+        unlink)     cmd_unlink "$@" ;;
         version|-v|--version) cmd_version ;;
         help|-h|--help) cmd_help ;;
         *)          die "Unknown command: $cmd. Run 'claude-code-sync help' for usage." ;;

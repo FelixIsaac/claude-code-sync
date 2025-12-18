@@ -556,6 +556,65 @@ function Invoke-Verify {
     }
 }
 
+function Invoke-Reset {
+    param([switch]$KeepKey)
+
+    if (-not (Test-Path $SYNC_DIR)) {
+        Write-Info "Nothing to reset - ~/.claude-sync does not exist."
+        return
+    }
+
+    Write-Host ""
+    Write-Host "This will delete:" -ForegroundColor Yellow
+    if ($KeepKey) {
+        Write-Host "  - $REPO_DIR (local repo)"
+        Write-Host "  - $CONFIG_FILE (config)"
+        Write-Host "  - $BACKUP_DIR (backups)"
+        Write-Host ""
+        Write-Host "Your key will be PRESERVED at $KEY_FILE" -ForegroundColor Green
+    } else {
+        Write-Host "  - $SYNC_DIR (everything including your private key!)" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "WARNING: If you haven't backed up your key, you will lose access" -ForegroundColor Red
+        Write-Host "to any encrypted configs in your repo!" -ForegroundColor Red
+    }
+    Write-Host ""
+
+    $confirm = Read-Host "Type 'yes' to confirm"
+    if ($confirm -ne "yes") {
+        Write-Info "Aborted."
+        return
+    }
+
+    if ($KeepKey) {
+        if (Test-Path $REPO_DIR) { Remove-Item -Recurse -Force $REPO_DIR }
+        if (Test-Path $CONFIG_FILE) { Remove-Item -Force $CONFIG_FILE }
+        if (Test-Path $BACKUP_DIR) { Remove-Item -Recurse -Force $BACKUP_DIR }
+        if (Test-Path $LOCK_FILE) { Remove-Item -Force $LOCK_FILE }
+        Write-Success "Reset complete. Key preserved. Run 'claude-code-sync init <repo-url>' to reconnect."
+    } else {
+        Remove-Item -Recurse -Force $SYNC_DIR
+        Write-Success "Reset complete. All sync data removed."
+    }
+}
+
+function Invoke-Unlink {
+    if (-not (Test-Path $REPO_DIR)) {
+        Write-Info "No repo linked."
+        return
+    }
+
+    $remotes = & git -C $REPO_DIR remote 2>$null
+    if ($remotes -contains "origin") {
+        & git -C $REPO_DIR remote remove origin
+        if (Test-Path $CONFIG_FILE) { Remove-Item -Force $CONFIG_FILE }
+        Write-Success "Unlinked from remote. Local repo preserved at $REPO_DIR"
+        Write-Info "To link to a new repo: git -C $REPO_DIR remote add origin <new-url>"
+    } else {
+        Write-Info "No remote configured."
+    }
+}
+
 function Show-Version {
     Write-Host "claude-code-sync v$VERSION"
 }
@@ -575,6 +634,9 @@ COMMANDS:
     import-key         Import private key on new machine
     export-key         Display private key for backup
     verify             Verify file integrity
+    reset              Delete all sync data (WARNING: deletes key!)
+    reset --keep-key   Reset but preserve your private key
+    unlink             Disconnect from remote repo (keep local data)
     version            Show version
     help               Show this help
 
@@ -606,6 +668,12 @@ switch ($Command.ToLower()) {
     "import-key" { Invoke-ImportKey }
     "export-key" { Invoke-ExportKey }
     "verify"     { Invoke-Verify }
+    "reset"      {
+        $keepKey = $Arguments -contains "--keep-key" -or $Arguments -contains "-k"
+        Invoke-Reset -KeepKey:$keepKey
+    }
+    "destroy"    { Invoke-Reset }  # Alias for reset
+    "unlink"     { Invoke-Unlink }
     "version"    { Show-Version }
     "-v"         { Show-Version }
     "--version"  { Show-Version }
