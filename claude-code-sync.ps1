@@ -165,12 +165,21 @@ function Invoke-Init {
         Write-Host "   IMPORTANT: SAVE YOUR PRIVATE KEY!   " -ForegroundColor Red
         Write-Host "========================================" -ForegroundColor Red
         Write-Host ""
-        Write-Host "Your private key (save this securely, you'll need it on other machines):"
+        Write-Host "Your PRIVATE KEY is the line starting with " -NoNewline
+        Write-Host "AGE-SECRET-KEY-" -ForegroundColor Cyan -NoNewline
+        Write-Host ":"
         Write-Host ""
-        Get-Content $KEY_FILE | Write-Host
+        Get-Content $KEY_FILE | ForEach-Object {
+            if ($_ -match "^AGE-SECRET-KEY-") {
+                Write-Host $_ -ForegroundColor Green -NoNewline
+                Write-Host "   <-- COPY THIS!" -ForegroundColor Yellow
+            } else {
+                Write-Host $_
+            }
+        }
         Write-Host ""
+        Write-Host "Copy the ENTIRE block above (including comments) to import on other machines." -ForegroundColor Cyan
         Write-Host "This key will NOT be shown again!" -ForegroundColor Yellow
-        Write-Host "Store it in a password manager or secure location." -ForegroundColor Yellow
         Write-Host ""
     }
 

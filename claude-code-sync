@@ -164,12 +164,18 @@ cmd_init() {
         echo -e "${RED}   IMPORTANT: SAVE YOUR PRIVATE KEY!   ${NC}"
         echo -e "${RED}========================================${NC}"
         echo ""
-        echo "Your private key (save this securely, you'll need it on other machines):"
+        echo -e "Your PRIVATE KEY is the line starting with ${BLUE}AGE-SECRET-KEY-${NC}:"
         echo ""
-        cat "$KEY_FILE"
+        while IFS= read -r line; do
+            if [[ "$line" == AGE-SECRET-KEY-* ]]; then
+                echo -e "${GREEN}${line}${NC}   ${YELLOW}<-- COPY THIS!${NC}"
+            else
+                echo "$line"
+            fi
+        done < "$KEY_FILE"
         echo ""
+        echo -e "${BLUE}Copy the ENTIRE block above (including comments) to import on other machines.${NC}"
         echo -e "${YELLOW}This key will NOT be shown again!${NC}"
-        echo -e "${YELLOW}Store it in a password manager or secure location.${NC}"
         echo ""
     fi
 
