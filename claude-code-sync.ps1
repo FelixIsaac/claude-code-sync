@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$VERSION = "1.0.0"
+$VERSION = "0.1.0"
 
 # Directories
 $CLAUDE_DIR = Join-Path $env:USERPROFILE ".claude"
