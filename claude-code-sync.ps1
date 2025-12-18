@@ -628,6 +628,23 @@ function Get-RemoteVersion {
     return $null
 }
 
+function Compare-SemVer {
+    # Returns: 1 if v1 > v2, -1 if v1 < v2, 0 if equal
+    param([string]$v1, [string]$v2)
+
+    $parts1 = $v1 -split '\.' | ForEach-Object { [int]$_ }
+    $parts2 = $v2 -split '\.' | ForEach-Object { [int]$_ }
+
+    for ($i = 0; $i -lt 3; $i++) {
+        $p1 = if ($i -lt $parts1.Count) { $parts1[$i] } else { 0 }
+        $p2 = if ($i -lt $parts2.Count) { $parts2[$i] } else { 0 }
+
+        if ($p1 -gt $p2) { return 1 }
+        if ($p1 -lt $p2) { return -1 }
+    }
+    return 0
+}
+
 function Invoke-CheckUpdate {
     Write-Info "Checking for updates..."
     $remoteVersion = Get-RemoteVersion
@@ -640,12 +657,16 @@ function Invoke-CheckUpdate {
     Write-Host "Local version:  v$VERSION"
     Write-Host "Remote version: v$remoteVersion"
 
-    if ($VERSION -eq $remoteVersion) {
+    $cmp = Compare-SemVer $remoteVersion $VERSION
+    if ($cmp -eq 0) {
         Write-Success "You're up to date!"
-    } else {
+    } elseif ($cmp -gt 0) {
         Write-Host ""
         Write-Host "Update available! Run: " -NoNewline
         Write-Host "claude-code-sync update" -ForegroundColor Cyan
+    } else {
+        Write-Host ""
+        Write-Host "You're ahead of remote (dev version?)" -ForegroundColor Yellow
     }
 }
 
@@ -657,8 +678,12 @@ function Invoke-Update {
         throw "Could not fetch remote version. Check your internet connection."
     }
 
-    if ($VERSION -eq $remoteVersion) {
+    $cmp = Compare-SemVer $remoteVersion $VERSION
+    if ($cmp -eq 0) {
         Write-Success "Already up to date (v$VERSION)"
+        return
+    } elseif ($cmp -lt 0) {
+        Write-Warn "Local version (v$VERSION) is newer than remote (v$remoteVersion). Skipping."
         return
     }
 
