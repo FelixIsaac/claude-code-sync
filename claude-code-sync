@@ -599,6 +599,66 @@ cmd_unlink() {
     fi
 }
 
+get_remote_version() {
+    local url="https://raw.githubusercontent.com/felixisaac/claude-code-sync/main/claude-code-sync"
+    local content
+    content=$(curl -fsSL --connect-timeout 10 "$url" 2>/dev/null) || return 1
+    echo "$content" | grep -oP 'VERSION="\K[^"]+' | head -1
+}
+
+cmd_check_update() {
+    log_info "Checking for updates..."
+
+    local remote_version
+    remote_version=$(get_remote_version)
+
+    if [[ -z "$remote_version" ]]; then
+        log_warn "Could not fetch remote version. Check your internet connection."
+        return
+    fi
+
+    echo "Local version:  v$VERSION"
+    echo "Remote version: v$remote_version"
+
+    if [[ "$VERSION" == "$remote_version" ]]; then
+        log_success "You're up to date!"
+    else
+        echo ""
+        echo -e "Update available! Run: ${BLUE}claude-code-sync update${NC}"
+    fi
+}
+
+cmd_update() {
+    log_info "Checking for updates..."
+
+    local remote_version
+    remote_version=$(get_remote_version)
+
+    if [[ -z "$remote_version" ]]; then
+        die "Could not fetch remote version. Check your internet connection."
+    fi
+
+    if [[ "$VERSION" == "$remote_version" ]]; then
+        log_success "Already up to date (v$VERSION)"
+        return
+    fi
+
+    log_info "Updating v$VERSION -> v$remote_version..."
+
+    # Find where we're installed
+    local script_path
+    script_path=$(command -v claude-code-sync 2>/dev/null || echo "$HOME/.local/bin/claude-code-sync")
+
+    # Download new version
+    local url="https://raw.githubusercontent.com/felixisaac/claude-code-sync/main/claude-code-sync"
+    if curl -fsSL "$url" -o "$script_path"; then
+        chmod +x "$script_path"
+        log_success "Updated to v$remote_version!"
+    else
+        die "Failed to download update"
+    fi
+}
+
 cmd_version() {
     echo "claude-code-sync v$VERSION"
 }
@@ -621,6 +681,8 @@ COMMANDS:
     reset              Delete all sync data (WARNING: deletes key!)
     reset --keep-key   Reset but preserve your private key
     unlink             Disconnect from remote repo (keep local data)
+    check-update       Check if a new version is available
+    update             Download and install latest version
     version            Show version
     help               Show this help
 
@@ -678,6 +740,8 @@ main() {
         reset)      cmd_reset "$@" ;;
         destroy)    cmd_reset "$@" ;;  # Alias for reset
         unlink)     cmd_unlink "$@" ;;
+        check-update) cmd_check_update ;;
+        update)     cmd_update ;;
         version|-v|--version) cmd_version ;;
         help|-h|--help) cmd_help ;;
         *)          die "Unknown command: $cmd. Run 'claude-code-sync help' for usage." ;;

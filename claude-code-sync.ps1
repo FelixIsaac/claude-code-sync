@@ -615,6 +615,71 @@ function Invoke-Unlink {
     }
 }
 
+function Get-RemoteVersion {
+    try {
+        $url = "https://raw.githubusercontent.com/felixisaac/claude-code-sync/main/claude-code-sync.ps1"
+        $content = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 10
+        if ($content.Content -match '\$VERSION\s*=\s*"([^"]+)"') {
+            return $Matches[1]
+        }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
+function Invoke-CheckUpdate {
+    Write-Info "Checking for updates..."
+    $remoteVersion = Get-RemoteVersion
+
+    if (-not $remoteVersion) {
+        Write-Warn "Could not fetch remote version. Check your internet connection."
+        return
+    }
+
+    Write-Host "Local version:  v$VERSION"
+    Write-Host "Remote version: v$remoteVersion"
+
+    if ($VERSION -eq $remoteVersion) {
+        Write-Success "You're up to date!"
+    } else {
+        Write-Host ""
+        Write-Host "Update available! Run: " -NoNewline
+        Write-Host "claude-code-sync update" -ForegroundColor Cyan
+    }
+}
+
+function Invoke-Update {
+    Write-Info "Checking for updates..."
+    $remoteVersion = Get-RemoteVersion
+
+    if (-not $remoteVersion) {
+        throw "Could not fetch remote version. Check your internet connection."
+    }
+
+    if ($VERSION -eq $remoteVersion) {
+        Write-Success "Already up to date (v$VERSION)"
+        return
+    }
+
+    Write-Info "Updating v$VERSION -> v$remoteVersion..."
+
+    # Find where we're installed
+    $scriptPath = $MyInvocation.ScriptName
+    if (-not $scriptPath) {
+        $scriptPath = Join-Path (Join-Path $env:USERPROFILE ".local\bin") "claude-code-sync.ps1"
+    }
+
+    # Download new version
+    $url = "https://raw.githubusercontent.com/felixisaac/claude-code-sync/main/claude-code-sync.ps1"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $scriptPath -UseBasicParsing
+        Write-Success "Updated to v$remoteVersion!"
+    } catch {
+        throw "Failed to download update: $_"
+    }
+}
+
 function Show-Version {
     Write-Host "claude-code-sync v$VERSION"
 }
@@ -637,6 +702,8 @@ COMMANDS:
     reset              Delete all sync data (WARNING: deletes key!)
     reset --keep-key   Reset but preserve your private key
     unlink             Disconnect from remote repo (keep local data)
+    check-update       Check if a new version is available
+    update             Download and install latest version
     version            Show version
     help               Show this help
 
@@ -674,6 +741,8 @@ switch ($Command.ToLower()) {
     }
     "destroy"    { Invoke-Reset }  # Alias for reset
     "unlink"     { Invoke-Unlink }
+    "check-update" { Invoke-CheckUpdate }
+    "update"     { Invoke-Update }
     "version"    { Show-Version }
     "-v"         { Show-Version }
     "--version"  { Show-Version }
