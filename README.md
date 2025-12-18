@@ -33,7 +33,7 @@ settings.json (contains secrets) → age encrypts → settings.json.age (unreada
 |----------|---------|
 | macOS | `brew install age` |
 | Ubuntu/Debian | `sudo apt install age` |
-| Windows (scoop) | `scoop install age` |
+| Windows (scoop) | `scoop bucket add extras && scoop install age` |
 | Windows (winget) | `winget install FiloSottile.age` |
 | Manual | [Download from releases](https://github.com/FiloSottile/age/releases) |
 
