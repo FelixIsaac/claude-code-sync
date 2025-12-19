@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$VERSION = "0.1.0"
+$VERSION = "0.1.1"
 
 # Directories
 $CLAUDE_DIR = Join-Path $env:USERPROFILE ".claude"
@@ -30,26 +30,38 @@ $REPO_DIR = Join-Path $SYNC_DIR "repo"
 $BACKUP_DIR = Join-Path $SYNC_DIR "backups"
 $LOCK_FILE = Join-Path $SYNC_DIR ".lock"
 
-# Patterns
+# Patterns - files to encrypt (contain secrets)
 $ENCRYPT_PATTERNS = @(
     "settings.json",
     "settings.local.json",
-    "claude.json"
+    "claude.json",
+    ".credentials.json",
+    "client_secret_*.json"
 )
 
+# Patterns - files/folders to exclude (not synced)
 $EXCLUDE_PATTERNS = @(
+    # Directories
     "plans",
-    "*.log",
-    "*.tmp",
-    ".git",
-    "*.local-backup-*",
-    "sessionStorage",
-    "*.cache",
     "projects",
     "local",
     "statsig",
+    "todos",
+    "debug",
+    "file-history",
+    "ide",
+    "plugins",
+    "shell-snapshots",
+    "telemetry",
+    "sessionStorage",
+    # Files
     "history.jsonl",
-    "todos"
+    "stats-cache.json",
+    "*.log",
+    "*.tmp",
+    "*.cache",
+    "*.local-backup-*",
+    ".git"
 )
 
 #--- Utility Functions ---#
@@ -95,17 +107,20 @@ function Test-ShouldEncrypt {
     $relPath = $FilePath.Replace("$CLAUDE_DIR\", "").Replace("$CLAUDE_DIR/", "")
 
     foreach ($pattern in $ENCRYPT_PATTERNS) {
-        if ($fileName -eq $pattern -or $relPath -like $pattern) {
-            return $true
+        # Use wildcard matching for patterns with *, exact match otherwise
+        if ($pattern.Contains('*')) {
+            if ($fileName -like $pattern) { return $true }
+        } else {
+            if ($fileName -eq $pattern) { return $true }
         }
     }
 
-    # Also encrypt claude.json
+    # Also encrypt claude.json (separate file at ~/)
     if ($FilePath -eq $CLAUDE_JSON) {
         return $true
     }
 
-    # Encrypt resources in skills
+    # Encrypt resources in skills (may contain credentials)
     if ($relPath -like "skills\*\resources\*" -or $relPath -like "skills/*/resources/*") {
         return $true
     }
@@ -118,10 +133,25 @@ function Test-ShouldExclude {
 
     $fileName = Split-Path $FilePath -Leaf
     $relPath = $FilePath.Replace("$CLAUDE_DIR\", "").Replace("$CLAUDE_DIR/", "")
+    # Normalize to forward slashes for consistent matching (case-insensitive)
+    $relPathNorm = $relPath.Replace("\", "/").ToLower()
 
     foreach ($pattern in $EXCLUDE_PATTERNS) {
-        if ($relPath -like "$pattern*" -or $fileName -like $pattern) {
-            return $true
+        $patternLower = $pattern.ToLower()
+        if ($pattern.Contains('*')) {
+            # Wildcard pattern - match against filename
+            if ($fileName -like $pattern) {
+                return $true
+            }
+        } else {
+            # Directory/file name - match if relPath starts with pattern/ or equals pattern
+            if ($relPathNorm -eq $patternLower -or $relPathNorm.StartsWith("$patternLower/")) {
+                return $true
+            }
+            # Also check exact filename match for file patterns like "history.jsonl"
+            if ($fileName.ToLower() -eq $patternLower) {
+                return $true
+            }
         }
     }
     return $false
@@ -359,7 +389,7 @@ function Invoke-Pull {
             # Backup existing file if different
             if (Test-Path $dest) {
                 $existingContent = Get-Content $dest -Raw -ErrorAction SilentlyContinue
-                $newContent = & age -d -i $KEY_FILE $file 2>$null
+                $newContent = & age -d -i $KEY_FILE $file 2>&1
                 if ($existingContent -ne $newContent) {
                     $backupName = "$dest.local-backup-$(Get-Timestamp)"
                     Write-Warn "Conflict: backing up $actualRelPath to $backupName"
@@ -408,9 +438,9 @@ function Invoke-Status {
     # Check remote status
     $remotes = & git -C $REPO_DIR remote
     if ($remotes -contains "origin") {
-        & git -C $REPO_DIR fetch origin 2>$null
-        $localCommit = & git -C $REPO_DIR rev-parse HEAD 2>$null
-        $remoteCommit = & git -C $REPO_DIR rev-parse origin/HEAD 2>$null
+        $null = & git -C $REPO_DIR fetch origin 2>&1
+        $localCommit = & git -C $REPO_DIR rev-parse HEAD 2>&1 | Select-Object -First 1
+        $remoteCommit = & git -C $REPO_DIR rev-parse origin/HEAD 2>&1 | Select-Object -First 1
 
         if ($localCommit -eq $remoteCommit) {
             Write-Host "Remote: " -NoNewline; Write-Host "Up to date" -ForegroundColor Green
@@ -604,7 +634,7 @@ function Invoke-Unlink {
         return
     }
 
-    $remotes = & git -C $REPO_DIR remote 2>$null
+    $remotes = & git -C $REPO_DIR remote 2>&1
     if ($remotes -contains "origin") {
         & git -C $REPO_DIR remote remove origin
         if (Test-Path $CONFIG_FILE) { Remove-Item -Force $CONFIG_FILE }

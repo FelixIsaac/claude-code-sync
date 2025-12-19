@@ -120,6 +120,8 @@ claude-code-sync pull
 - `settings.json` - May contain API keys in `env`
 - `settings.local.json` - User overrides
 - `~/.claude.json` - OAuth tokens, MCP server configs (separate file at home dir, not inside ~/.claude/)
+- `.credentials.json` - OAuth credentials
+- `client_secret_*.json` - OAuth client secrets
 - `skills/*/resources/*` - May contain credentials
 
 ### Excluded (not synced)
@@ -129,6 +131,13 @@ claude-code-sync pull
 - `statsig/` - Analytics/telemetry data
 - `history.jsonl` - Conversation history index
 - `todos/` - Session-specific todo files
+- `debug/` - Debug logs
+- `file-history/` - File history cache
+- `ide/` - IDE integration cache
+- `plugins/` - Plugin cache
+- `shell-snapshots/` - Shell state snapshots
+- `telemetry/` - Telemetry data
+- `stats-cache.json` - Statistics cache
 - `*.log`, `*.tmp`, `*.cache`
 
 ## Security

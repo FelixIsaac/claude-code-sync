@@ -3,7 +3,7 @@
 # https://github.com/felixisaac/claude-code-sync
 set -euo pipefail
 
-VERSION="0.1.0"
+VERSION="0.1.1"
 
 # Directories
 CLAUDE_DIR="$HOME/.claude"
@@ -27,23 +27,34 @@ ENCRYPT_PATTERNS=(
     "settings.json"
     "settings.local.json"
     "claude.json"
+    ".credentials.json"
+    "client_secret_*.json"
     "skills/*/resources/*"
 )
 
 # Files/dirs to exclude from sync
 EXCLUDE_PATTERNS=(
+    # Directories
     "plans"
-    "*.log"
-    "*.tmp"
-    ".git"
-    "*.local-backup-*"
-    "sessionStorage"
-    "*.cache"
     "projects"
     "local"
     "statsig"
-    "history.jsonl"
     "todos"
+    "debug"
+    "file-history"
+    "ide"
+    "plugins"
+    "shell-snapshots"
+    "telemetry"
+    "sessionStorage"
+    # Files
+    "history.jsonl"
+    "stats-cache.json"
+    "*.log"
+    "*.tmp"
+    "*.cache"
+    "*.local-backup-*"
+    ".git"
 )
 
 #--- Utility Functions ---#
@@ -89,16 +100,26 @@ get_public_key() {
 should_encrypt() {
     local file="$1"
     local relpath="${file#$CLAUDE_DIR/}"
+    local filename
+    filename=$(basename "$relpath")
 
     # Check against encrypt patterns
     for pattern in "${ENCRYPT_PATTERNS[@]}"; do
         # shellcheck disable=SC2053
-        if [[ "$relpath" == $pattern ]] || [[ "$(basename "$relpath")" == "$pattern" ]]; then
-            return 0
+        if [[ "$pattern" == *"*"* ]]; then
+            # Wildcard pattern - match against filename or full path
+            if [[ "$filename" == $pattern ]] || [[ "$relpath" == $pattern ]]; then
+                return 0
+            fi
+        else
+            # Exact match against filename
+            if [[ "$filename" == "$pattern" ]]; then
+                return 0
+            fi
         fi
     done
 
-    # Also encrypt claude.json (separate file)
+    # Also encrypt claude.json (separate file at ~/)
     if [[ "$file" == "$CLAUDE_JSON" ]]; then
         return 0
     fi
@@ -109,11 +130,25 @@ should_encrypt() {
 should_exclude() {
     local file="$1"
     local relpath="${file#$CLAUDE_DIR/}"
+    local filename
+    filename=$(basename "$relpath")
 
     for pattern in "${EXCLUDE_PATTERNS[@]}"; do
         # shellcheck disable=SC2053
-        if [[ "$relpath" == $pattern* ]] || [[ "$(basename "$relpath")" == $pattern ]]; then
-            return 0
+        if [[ "$pattern" == *"*"* ]]; then
+            # Wildcard pattern - match against filename
+            if [[ "$filename" == $pattern ]]; then
+                return 0
+            fi
+        else
+            # Directory/file name - match if relpath starts with pattern/ or equals pattern
+            if [[ "$relpath" == "$pattern" ]] || [[ "$relpath" == "$pattern/"* ]]; then
+                return 0
+            fi
+            # Also check exact filename match
+            if [[ "$filename" == "$pattern" ]]; then
+                return 0
+            fi
         fi
     done
     return 1
