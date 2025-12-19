@@ -58,7 +58,7 @@ var DefaultEncryptPatterns = []string{
 
 // DefaultExcludePatterns are files/dirs that should not be synced
 var DefaultExcludePatterns = []string{
-	// Directories
+	// Directories (full exclude)
 	"plans",
 	"projects",
 	"local",
@@ -67,10 +67,12 @@ var DefaultExcludePatterns = []string{
 	"debug",
 	"file-history",
 	"ide",
-	"plugins",
 	"shell-snapshots",
 	"telemetry",
 	"sessionStorage",
+	// Plugins subdirs (keep installed_plugins.json, known_marketplaces.json)
+	"plugins/cache",
+	"plugins/marketplaces",
 	// Files
 	"history.jsonl",
 	"stats-cache.json",
