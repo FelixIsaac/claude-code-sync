@@ -81,25 +81,38 @@ If you use [Claude Code](https://claude.com/claude-code) across multiple machine
 
 ## Installation
 
-### macOS (Homebrew)
+### Linux
 
 ```bash
-brew install felixisaac/tap/claude-code-sync
-```
-
-### Windows (Scoop)
-
-```powershell
-scoop bucket add felixisaac https://github.com/felixisaac/scoop-bucket
-scoop install claude-code-sync
-```
-
-### Linux (Manual)
-
-```bash
-# Download latest release (adjust arch: amd64 or arm64)
+# Download and install (adjust arch: amd64 or arm64)
 curl -sL https://github.com/felixisaac/claude-code-sync/releases/latest/download/claude-code-sync_linux_amd64.tar.gz | tar xz
 sudo mv claude-code-sync /usr/local/bin/
+```
+
+### macOS
+
+```bash
+# Download and install (adjust arch: amd64 or arm64)
+curl -sL https://github.com/felixisaac/claude-code-sync/releases/latest/download/claude-code-sync_darwin_amd64.tar.gz | tar xz
+sudo mv claude-code-sync /usr/local/bin/
+```
+
+### Windows
+
+**Option 1: Download binary**
+
+Download `claude-code-sync_windows_amd64.zip` from [GitHub Releases](https://github.com/felixisaac/claude-code-sync/releases/latest), extract, and add to PATH.
+
+**Option 2: PowerShell one-liner**
+
+```powershell
+# Download to ~/.local/bin (add to PATH if needed)
+$uri = "https://github.com/felixisaac/claude-code-sync/releases/latest/download/claude-code-sync_windows_amd64.zip"
+$dest = "$env:USERPROFILE\.local\bin"
+New-Item -ItemType Directory -Force -Path $dest | Out-Null
+Invoke-WebRequest -Uri $uri -OutFile "$env:TEMP\claude-code-sync.zip"
+Expand-Archive -Path "$env:TEMP\claude-code-sync.zip" -DestinationPath $dest -Force
+Remove-Item "$env:TEMP\claude-code-sync.zip"
 ```
 
 ### Go
@@ -108,20 +121,13 @@ sudo mv claude-code-sync /usr/local/bin/
 go install github.com/felixisaac/claude-code-sync/cmd/claude-code-sync@latest
 ```
 
-### Manual
-
-Download the latest binary from [GitHub Releases](https://github.com/felixisaac/claude-code-sync/releases).
-
 ### Updating
 
 ```bash
 # Check for updates
 claude-code-sync check-update
 
-# Update via package manager
-brew upgrade claude-code-sync    # macOS
-scoop update claude-code-sync    # Windows
-
+# Re-run installation command for your platform
 # Or download latest from GitHub Releases
 ```
 

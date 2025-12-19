@@ -46,27 +46,6 @@ changelog:
       - Merge pull request
       - Merge branch
 
-brews:
-  - repository:
-      owner: felixisaac
-      name: homebrew-tap
-    directory: Formula
-    homepage: https://github.com/felixisaac/claude-code-sync
-    description: Sync Claude Code configs across machines via GitHub with age encryption
-    license: MIT
-    install: |
-      bin.install "claude-code-sync"
-    test: |
-      system "#{bin}/claude-code-sync", "version"
-
-scoops:
-  - repository:
-      owner: felixisaac
-      name: scoop-bucket
-    homepage: https://github.com/felixisaac/claude-code-sync
-    description: Sync Claude Code configs across machines via GitHub with age encryption
-    license: MIT
-
 release:
   github:
     owner: felixisaac
