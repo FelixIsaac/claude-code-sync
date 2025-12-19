@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/fatih/color"
 	"github.com/felixisaac/claude-code-sync/internal/config"
@@ -11,6 +12,11 @@ import (
 	"github.com/felixisaac/claude-code-sync/internal/sync"
 	"github.com/spf13/cobra"
 )
+
+// toUnixPath converts Windows backslashes to forward slashes for display
+func toUnixPath(path string) string {
+	return strings.ReplaceAll(path, "\\", "/")
+}
 
 var initCmd = &cobra.Command{
 	Use:   "init [repo-url]",
@@ -95,8 +101,19 @@ func runInit(cmd *cobra.Command, args []string) error {
 	g := git.New(paths.RepoDir)
 
 	if repoURL != "" {
+		// Validate URL format
+		if !git.IsValidRepoURL(repoURL) {
+			return fmt.Errorf("invalid repo URL: %s\nExpected format: https://github.com/user/repo or git@github.com:user/repo.git", repoURL)
+		}
+
+		// Check if URL is reachable
+		logInfo("Verifying repo URL...")
+		if err := git.CheckRemote(repoURL); err != nil {
+			return fmt.Errorf("cannot access repo: %w\nCheck the URL and your permissions", err)
+		}
+
 		if g.IsRepo() {
-			logWarn(fmt.Sprintf("Repo already exists at %s", paths.RepoDir))
+			logWarn(fmt.Sprintf("Repo already exists at %s", toUnixPath(paths.RepoDir)))
 		} else {
 			logInfo("Cloning repo...")
 			if err := git.Clone(repoURL, paths.RepoDir); err != nil {
@@ -115,7 +132,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println()
 		logInfo("No repo URL provided. To add a remote later:")
-		fmt.Printf("  git -C %s remote add origin <your-repo-url>\n", paths.RepoDir)
+		fmt.Printf("  git -C \"%s\" remote add origin <your-repo-url>\n", toUnixPath(paths.RepoDir))
 		fmt.Println("  claude-code-sync push")
 	}
 

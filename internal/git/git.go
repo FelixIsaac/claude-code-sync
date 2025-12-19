@@ -145,6 +145,40 @@ func IsInstalled() bool {
 	return err == nil
 }
 
+// IsValidRepoURL checks if a string looks like a valid git repo URL
+func IsValidRepoURL(url string) bool {
+	// HTTPS URLs
+	if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") {
+		return strings.Contains(url, "/")
+	}
+	// SSH URLs (git@host:user/repo)
+	if strings.HasPrefix(url, "git@") {
+		return strings.Contains(url, ":")
+	}
+	// SSH URLs (ssh://git@host/user/repo)
+	if strings.HasPrefix(url, "ssh://") {
+		return strings.Contains(url, "/")
+	}
+	return false
+}
+
+// CheckRemote verifies a remote URL is accessible
+func CheckRemote(url string) error {
+	cmd := exec.Command("git", "ls-remote", "--exit-code", url)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg != "" {
+			return fmt.Errorf("%s", errMsg)
+		}
+		return fmt.Errorf("repository not found or not accessible")
+	}
+	return nil
+}
+
 // CreateInitialCommit creates a README and initial commit
 func (g *Git) CreateInitialCommit() error {
 	readme := filepath.Join(g.repoDir, "README.md")
