@@ -175,7 +175,53 @@ func runPull(cmd *cobra.Command, args []string) error {
 	if pullDryRun {
 		logInfo(fmt.Sprintf("[DRY RUN] Would restore %d files", count))
 	} else {
+		// Expand cross-platform path placeholders to local paths
+		if err := expandPluginPaths(paths.ClaudeDir); err != nil {
+			logWarn(fmt.Sprintf("Failed to expand plugin paths: %v", err))
+		}
+
 		logSuccess(fmt.Sprintf("Pull complete! Restored %d files.", count))
+	}
+
+	return nil
+}
+
+// expandPluginPaths converts cross-platform placeholders to local platform paths
+// in plugin configuration files after pulling from the repo.
+func expandPluginPaths(claudeDir string) error {
+	// Find all JSON files in plugins directory that may contain path placeholders
+	pluginsDir := filepath.Join(claudeDir, "plugins")
+	if !sync.FileExists(pluginsDir) {
+		return nil
+	}
+
+	files, err := sync.WalkFiles(pluginsDir)
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		if !strings.HasSuffix(file, ".json") {
+			continue
+		}
+
+		data, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+
+		// Only process if file contains the placeholder
+		if !strings.Contains(string(data), sync.ClaudeDirPlaceholder) {
+			continue
+		}
+
+		expanded := sync.ExpandPathsInJSON(data, claudeDir)
+		if err := os.WriteFile(file, expanded, 0644); err != nil {
+			return fmt.Errorf("failed to write expanded %s: %w", file, err)
+		}
+
+		relPath := sync.RelPath(claudeDir, file)
+		logInfo(fmt.Sprintf("Expanded paths: %s", relPath))
 	}
 
 	return nil

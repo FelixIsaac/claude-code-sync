@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/felixisaac/claude-code-sync/internal/config"
 	"github.com/felixisaac/claude-code-sync/internal/crypto"
@@ -116,6 +118,11 @@ func runPush(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Normalize paths in plugin config files for cross-platform compatibility
+	if err := normalizePluginPaths(paths.RepoDir, paths.ClaudeDir); err != nil {
+		logWarn(fmt.Sprintf("Failed to normalize plugin paths: %v", err))
+	}
+
 	// Generate manifest
 	logInfo("Generating manifest...")
 	entries, err := sync.GenerateManifest(paths.RepoDir)
@@ -160,5 +167,48 @@ func runPush(cmd *cobra.Command, args []string) error {
 	}
 
 	logSuccess("Push complete!")
+	return nil
+}
+
+// normalizePluginPaths converts platform-specific paths to cross-platform placeholders
+// in plugin configuration files for seamless syncing across Windows/macOS/Linux.
+func normalizePluginPaths(repoDir, claudeDir string) error {
+	// Find all JSON files in plugins directory that may contain paths
+	pluginsDir := filepath.Join(repoDir, "plugins")
+	if !sync.FileExists(pluginsDir) {
+		return nil
+	}
+
+	files, err := sync.WalkFiles(pluginsDir)
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		if !strings.HasSuffix(file, ".json") {
+			continue
+		}
+
+		data, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+
+		// Only process if file contains the claude dir path
+		if !strings.Contains(string(data), claudeDir) &&
+			!strings.Contains(string(data), filepath.ToSlash(claudeDir)) &&
+			!strings.Contains(string(data), strings.ReplaceAll(claudeDir, `\`, `\\`)) {
+			continue
+		}
+
+		normalized := sync.NormalizePathsInJSON(data, claudeDir)
+		if err := os.WriteFile(file, normalized, 0644); err != nil {
+			return fmt.Errorf("failed to write normalized %s: %w", file, err)
+		}
+
+		relPath := sync.RelPath(repoDir, file)
+		logInfo(fmt.Sprintf("Normalized paths: %s", relPath))
+	}
+
 	return nil
 }

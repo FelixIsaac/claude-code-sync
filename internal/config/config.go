@@ -70,9 +70,6 @@ var DefaultExcludePatterns = []string{
 	"shell-snapshots",
 	"telemetry",
 	"sessionStorage",
-	// Plugins subdirs (keep installed_plugins.json, known_marketplaces.json)
-	"plugins/cache",
-	"plugins/marketplaces",
 	// Files
 	"history.jsonl",
 	"stats-cache.json",
