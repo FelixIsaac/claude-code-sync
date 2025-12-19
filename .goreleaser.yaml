@@ -1,0 +1,75 @@
+version: 2
+
+project_name: claude-code-sync
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: claude-code-sync
+    main: ./cmd/claude-code-sync
+    binary: claude-code-sync
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+
+brews:
+  - repository:
+      owner: felixisaac
+      name: homebrew-tap
+    directory: Formula
+    homepage: https://github.com/felixisaac/claude-code-sync
+    description: Sync Claude Code configs across machines via GitHub with age encryption
+    license: MIT
+    install: |
+      bin.install "claude-code-sync"
+    test: |
+      system "#{bin}/claude-code-sync", "version"
+
+scoops:
+  - repository:
+      owner: felixisaac
+      name: scoop-bucket
+    homepage: https://github.com/felixisaac/claude-code-sync
+    description: Sync Claude Code configs across machines via GitHub with age encryption
+    license: MIT
+
+release:
+  github:
+    owner: felixisaac
+    name: claude-code-sync
+  draft: false
+  prerelease: auto

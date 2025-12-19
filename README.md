@@ -5,57 +5,48 @@ Secure cross-platform CLI to sync [Claude Code](https://claude.com/claude-code) 
 ## Why?
 
 - **Multi-machine developers**: Keep your custom commands, agents, skills, and settings in sync across desktop, laptop, and SSH servers
-- **Security**: API keys and OAuth tokens are encrypted with age before pushing to GitHub
+- **Security**: API keys and OAuth tokens are encrypted with native age before pushing to GitHub
 - **Simple**: Just `push` and `pull` - no learning curve, no complex setup
-- **Open source**: Audit the code yourself - it's ~400 lines of bash/PowerShell
+- **Single binary**: No external dependencies except git - age encryption is built-in
 
 ## Features
 
 - Selective encryption (plain text for non-sensitive files, encrypted for secrets)
-- Cross-platform (bash for macOS/Linux, PowerShell for Windows)
+- Cross-platform single binary (Windows, macOS, Linux - amd64/arm64)
+- Native age encryption built-in (no external age CLI needed)
+- `--dry-run` flag for push and pull
 - Automatic backups before pull
 - Conflict detection with local backup
 - SHA256 integrity verification
+- `doctor` command to verify setup
 
 ## Prerequisites
 
-### age (encryption tool)
-
-**[age](https://github.com/FiloSottile/age)** is a simple, modern file encryption tool. claude-code-sync uses it to encrypt your sensitive files (API keys, OAuth tokens) before pushing to GitHub.
-
-```
-settings.json (contains secrets) → age encrypts → settings.json.age (unreadable) → GitHub
-```
-
-**Install age:**
-
-| Platform | Command |
-|----------|---------|
-| macOS | `brew install age` |
-| Ubuntu/Debian | `sudo apt install age` |
-| Windows (scoop) | `scoop bucket add extras && scoop install age` |
-| Windows (winget) | `winget install FiloSottile.age` |
-| Manual | [Download from releases](https://github.com/FiloSottile/age/releases) |
-
 ### git
 
-You'll also need `git` installed (you probably already have it).
+You'll need `git` installed (you probably already have it).
+
+**Note**: age encryption is now built into the binary - no external age CLI needed!
 
 ## Installation
 
-The install script downloads `claude-code-sync` to `~/.local/bin/` and adds it to your PATH.
-
-**macOS/Linux:**
+**macOS (Homebrew):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/felixisaac/claude-code-sync/main/install.sh | bash
+brew install felixisaac/tap/claude-code-sync
 ```
 
-**Windows (PowerShell):**
+**Windows (Scoop):**
 ```powershell
-irm https://raw.githubusercontent.com/felixisaac/claude-code-sync/main/install.ps1 | iex
+scoop bucket add felixisaac https://github.com/felixisaac/scoop-bucket
+scoop install claude-code-sync
 ```
 
-**Manual installation:** You can also just download `claude-code-sync` (Unix) or `claude-code-sync.ps1` (Windows) directly and put it somewhere in your PATH.
+**Go:**
+```bash
+go install github.com/felixisaac/claude-code-sync@latest
+```
+
+**Manual:** Download the latest binary from [GitHub Releases](https://github.com/felixisaac/claude-code-sync/releases).
 
 ### First Time Setup
 
@@ -94,17 +85,16 @@ claude-code-sync pull
 | Command | Description |
 |---------|-------------|
 | `init [repo-url]` | Initialize sync (generate keys, clone/create repo) |
-| `push` | Encrypt and push configs to GitHub |
-| `pull` | Pull and decrypt configs from GitHub |
+| `push [--dry-run]` | Encrypt and push configs to GitHub |
+| `pull [--dry-run]` | Pull and decrypt configs from GitHub |
 | `status` | Show sync status |
+| `doctor` | Check system health and setup |
 | `import-key` | Import private key on new machine |
 | `export-key` | Display private key for backup |
 | `verify` | Verify file integrity |
-| `reset` | Delete all sync data (⚠️ deletes key!) |
-| `reset --keep-key` | Reset but preserve your private key |
+| `reset [--keep-key]` | Delete all sync data |
 | `unlink` | Disconnect from remote repo (keep local data) |
-| `check-update` | Check if a new version is available |
-| `update` | Download and install latest version |
+| `version` | Show version |
 | `help` | Show help |
 
 ## What Gets Synced
@@ -143,7 +133,7 @@ claude-code-sync pull
 ## Security
 
 ### Encryption
-- Uses [age](https://github.com/FiloSottile/age) (modern, audited encryption)
+- Uses [filippo.io/age](https://github.com/FiloSottile/age) Go library (built-in, no external CLI)
 - X25519 key exchange
 - ChaCha20-Poly1305 encryption
 

@@ -1,0 +1,14 @@
+# Binary (root only)
+/claude-code-sync
+/claude-code-sync.exe
+/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
