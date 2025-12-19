@@ -46,7 +46,27 @@ scoop install claude-code-sync
 go install github.com/felixisaac/claude-code-sync@latest
 ```
 
+**Linux (manual):**
+```bash
+# Download latest release (adjust arch: amd64 or arm64)
+curl -sL https://github.com/felixisaac/claude-code-sync/releases/latest/download/claude-code-sync_linux_amd64.tar.gz | tar xz
+sudo mv claude-code-sync /usr/local/bin/
+```
+
 **Manual:** Download the latest binary from [GitHub Releases](https://github.com/felixisaac/claude-code-sync/releases).
+
+### Updating
+
+```bash
+# Check for updates
+claude-code-sync check-update
+
+# Update via package manager
+brew upgrade claude-code-sync    # macOS
+scoop update claude-code-sync    # Windows
+
+# Or download latest from GitHub Releases
+```
 
 ### First Time Setup
 
@@ -95,6 +115,7 @@ claude-code-sync pull
 | `reset [--keep-key]` | Delete all sync data |
 | `unlink` | Disconnect from remote repo (keep local data) |
 | `version` | Show version |
+| `check-update` | Check for newer version |
 | `help` | Show help |
 
 ## What Gets Synced
@@ -124,7 +145,8 @@ claude-code-sync pull
 - `debug/` - Debug logs
 - `file-history/` - File history cache
 - `ide/` - IDE integration cache
-- `plugins/` - Plugin cache
+- `plugins/cache/` - Plugin cache
+- `plugins/marketplaces/` - Marketplace cache (installed_plugins.json and known_marketplaces.json ARE synced)
 - `shell-snapshots/` - Shell state snapshots
 - `telemetry/` - Telemetry data
 - `stats-cache.json` - Statistics cache
