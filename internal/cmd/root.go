@@ -38,6 +38,7 @@ func init() {
 	rootCmd.AddCommand(unlinkCmd)
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(checkUpdateCmd)
+	rootCmd.AddCommand(updateCmd)
 }
 
 // UI helpers
