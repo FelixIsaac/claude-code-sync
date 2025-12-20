@@ -191,7 +191,9 @@ func runPull(cmd *cobra.Command, args []string) error {
 func expandPluginPaths(claudeDir string) error {
 	// Find all JSON files in plugins directory that may contain path placeholders
 	pluginsDir := filepath.Join(claudeDir, "plugins")
+	logInfo(fmt.Sprintf("Checking for plugin paths to expand in: %s", pluginsDir))
 	if !sync.FileExists(pluginsDir) {
+		logInfo("Plugins directory does not exist, skipping expansion")
 		return nil
 	}
 
@@ -199,6 +201,8 @@ func expandPluginPaths(claudeDir string) error {
 	if err != nil {
 		return err
 	}
+
+	logInfo(fmt.Sprintf("Found %d files in plugins directory", len(files)))
 
 	for _, file := range files {
 		if !strings.HasSuffix(file, ".json") {
@@ -214,6 +218,8 @@ func expandPluginPaths(claudeDir string) error {
 		if !strings.Contains(string(data), sync.ClaudeDirPlaceholder) {
 			continue
 		}
+
+		logInfo(fmt.Sprintf("Found placeholder in: %s", file))
 
 		expanded := sync.ExpandPathsInJSON(data, claudeDir)
 		if err := os.WriteFile(file, expanded, 0644); err != nil {
