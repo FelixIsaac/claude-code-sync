@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 )
@@ -29,33 +30,76 @@ func NormalizePathsInJSON(data []byte, claudeDir string) []byte {
 
 // ExpandPathsInJSON replaces the cross-platform placeholder with the local ClaudeDir path.
 // The expanded path uses the native format for the current platform.
+// Uses JSON parsing to safely handle escape sequences.
 func ExpandPathsInJSON(data []byte, claudeDir string) []byte {
+	// First, parse as JSON to get the structure
+	var obj interface{}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		// If not valid JSON, fall back to string replacement
+		return fallbackExpandPaths(data, claudeDir)
+	}
+
+	// Recursively replace placeholders in the parsed object
+	expanded := expandInObject(obj, claudeDir)
+
+	// Marshal back to JSON with proper formatting
+	result, err := json.MarshalIndent(expanded, "", "  ")
+	if err != nil {
+		// If marshaling fails, fall back
+		return fallbackExpandPaths(data, claudeDir)
+	}
+
+	return result
+}
+
+// expandInObject recursively expands placeholders in JSON objects
+func expandInObject(obj interface{}, claudeDir string) interface{} {
+	switch v := obj.(type) {
+	case map[string]interface{}:
+		for k, val := range v {
+			v[k] = expandInObject(val, claudeDir)
+		}
+		return v
+	case []interface{}:
+		for i, val := range v {
+			v[i] = expandInObject(val, claudeDir)
+		}
+		return v
+	case string:
+		if strings.Contains(v, ClaudeDirPlaceholder) {
+			// Replace placeholder with local path
+			expanded := strings.ReplaceAll(v, ClaudeDirPlaceholder, claudeDir)
+
+			// On Unix systems, convert backslashes to forward slashes in paths
+			if !strings.Contains(claudeDir, `\`) {
+				// This is Unix - convert Windows-style backslashes to forward slashes
+				// But only convert path separators, not escape sequences
+				// In JSON strings, \\ is already unescaped to \, so we just replace \
+				expanded = strings.ReplaceAll(expanded, `\`, `/`)
+			}
+
+			return expanded
+		}
+		return v
+	default:
+		return v
+	}
+}
+
+// fallbackExpandPaths is a safe string-based fallback that only replaces in quoted strings
+func fallbackExpandPaths(data []byte, claudeDir string) []byte {
 	content := string(data)
 
 	// For JSON files, we need to use escaped backslashes on Windows
-	// Check if we're on Windows by looking for backslashes in claudeDir
 	if strings.Contains(claudeDir, `\`) {
 		// Windows: use escaped backslashes for JSON
 		escapedClaudeDir := strings.ReplaceAll(claudeDir, `\`, `\\`)
 		content = strings.ReplaceAll(content, ClaudeDirPlaceholder, escapedClaudeDir)
 	} else {
-		// Unix: replace placeholder first
-		content = strings.ReplaceAll(content, ClaudeDirPlaceholder, claudeDir)
-
-		// Convert path separators: replace \\ with / on lines that now contain the expanded path
-		lines := strings.Split(content, "\n")
-		for i, line := range lines {
-			if strings.Contains(line, claudeDir) {
-				// This line now contains the expanded path with backslashes
-				// Replace \\ (escaped backslash in JSON = one actual backslash) with /
-				// Go string literal: `\\` is actually two characters (backslash, backslash) in the source
-				// When applied to JSON content, "C:\\Users" becomes /home/ubuntu/.claude\plugins\...
-				// And we want to convert \plugins to /plugins
-				line = strings.ReplaceAll(line, `\`, `/`)
-				lines[i] = line
-			}
-		}
-		content = strings.Join(lines, "\n")
+		// Unix: replace placeholder with forward-slash path
+		// This is safer than replacing all backslashes
+		normalizedPath := filepath.ToSlash(claudeDir) // ensure forward slashes
+		content = strings.ReplaceAll(content, ClaudeDirPlaceholder, normalizedPath)
 	}
 
 	return []byte(content)
