@@ -73,9 +73,10 @@ func expandInObject(obj interface{}, claudeDir string) interface{} {
 			// On Unix systems, convert backslashes to forward slashes in paths
 			if !strings.Contains(claudeDir, `\`) {
 				// This is Unix - convert Windows-style backslashes to forward slashes
-				// But only convert path separators, not escape sequences
-				// In JSON strings, \\ is already unescaped to \, so we just replace \
-				expanded = strings.ReplaceAll(expanded, `\`, `/`)
+				// Use string replacement with explicit backslash character
+				// The JSON unmarshaler has already converted \\ to \, so we just need to convert \ to /
+				backslash := string(rune(92)) // ASCII 92 = backslash
+				expanded = strings.ReplaceAll(expanded, backslash, `/`)
 			}
 
 			return expanded
