@@ -98,9 +98,14 @@ func fallbackExpandPaths(data []byte, claudeDir string) []byte {
 		content = strings.ReplaceAll(content, ClaudeDirPlaceholder, escapedClaudeDir)
 	} else {
 		// Unix: replace placeholder with forward-slash path
-		// This is safer than replacing all backslashes
 		normalizedPath := filepath.ToSlash(claudeDir) // ensure forward slashes
 		content = strings.ReplaceAll(content, ClaudeDirPlaceholder, normalizedPath)
+
+		// Also convert Windows-style backslashes to forward slashes
+		// This handles cases where the stored JSON has raw backslashes from Windows paths
+		backslash := string(rune(92)) // ASCII 92 = backslash
+		forwardSlash := `/`
+		content = strings.ReplaceAll(content, backslash, forwardSlash)
 	}
 
 	return []byte(content)
