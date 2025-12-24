@@ -14,18 +14,24 @@ import (
 )
 
 var (
-	pushDryRun bool
+	pushDryRun          bool
+	pushNoPlatformCheck bool
 )
 
 var pushCmd = &cobra.Command{
 	Use:   "push",
 	Short: "Encrypt and push configs to GitHub",
-	Long:  `Sync local ~/.claude/ configs to your GitHub repo.`,
-	RunE:  runPush,
+	Long: `Sync local ~/.claude/ configs to your GitHub repo.
+
+Platform detection:
+  By default, warns if files contain platform-specific content without variants.
+  Use --no-platform-check to skip this detection.`,
+	RunE: runPush,
 }
 
 func init() {
 	pushCmd.Flags().BoolVar(&pushDryRun, "dry-run", false, "Show what would be synced without doing it")
+	pushCmd.Flags().BoolVar(&pushNoPlatformCheck, "no-platform-check", false, "Skip platform-specific content detection")
 }
 
 func runPush(cmd *cobra.Command, args []string) error {
@@ -121,6 +127,27 @@ func runPush(cmd *cobra.Command, args []string) error {
 	// Normalize paths in plugin config files for cross-platform compatibility
 	if err := normalizePluginPaths(paths.RepoDir, paths.ClaudeDir); err != nil {
 		logWarn(fmt.Sprintf("Failed to normalize plugin paths: %v", err))
+	}
+
+	// Check for platform-specific content without variants
+	if !pushNoPlatformCheck {
+		repoFiles, err := sync.WalkFiles(paths.RepoDir)
+		if err == nil {
+			warnings := sync.CheckPlatformVariants(paths.RepoDir, repoFiles)
+			if len(warnings) > 0 {
+				logWarn("Platform-specific content detected without variants:")
+				for _, w := range warnings {
+					logWarn(fmt.Sprintf("  %s contains %s syntax (%s)", w.File, w.Platform, w.Pattern))
+					otherPlatform := "windows"
+					if w.Platform == "windows" {
+						otherPlatform = "unix"
+					}
+					variantName := sync.GetPlatformVariantName(w.File, otherPlatform)
+					logInfo(fmt.Sprintf("    Consider creating: %s", variantName))
+				}
+				logInfo("Use --no-platform-check to skip this warning")
+			}
+		}
 	}
 
 	// Generate manifest
