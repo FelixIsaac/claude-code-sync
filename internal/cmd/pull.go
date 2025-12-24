@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/felixisaac/claude-code-sync/internal/config"
 	"github.com/felixisaac/claude-code-sync/internal/crypto"
@@ -16,21 +18,55 @@ import (
 )
 
 var (
-	pullDryRun bool
+	pullDryRun   bool
+	pullOurs     bool
+	pullTheirs   bool
+	pullShowDiff bool
 )
 
 var pullCmd = &cobra.Command{
 	Use:   "pull",
 	Short: "Pull and decrypt configs from GitHub",
-	Long:  `Pull configs from your GitHub repo and decrypt them to ~/.claude/`,
-	RunE:  runPull,
+	Long: `Pull configs from your GitHub repo and decrypt them to ~/.claude/
+
+Conflict handling:
+  By default, remote changes overwrite local (with backup).
+  Use --ours to keep local versions when they differ from remote.
+  Use --diff to preview differences without applying changes.`,
+	RunE: runPull,
 }
 
 func init() {
 	pullCmd.Flags().BoolVar(&pullDryRun, "dry-run", false, "Show what would be restored without doing it")
+	pullCmd.Flags().BoolVar(&pullOurs, "ours", false, "Keep local files when they differ from remote")
+	pullCmd.Flags().BoolVar(&pullTheirs, "theirs", false, "Apply remote files, backup local (default behavior)")
+	pullCmd.Flags().BoolVar(&pullShowDiff, "diff", false, "Show differences between local and remote without applying")
 }
 
 func runPull(cmd *cobra.Command, args []string) error {
+	// Validate mutually exclusive flags
+	flagCount := 0
+	if pullOurs {
+		flagCount++
+	}
+	if pullTheirs {
+		flagCount++
+	}
+	if pullShowDiff {
+		flagCount++
+	}
+	if flagCount > 1 {
+		return fmt.Errorf("--ours, --theirs, and --diff are mutually exclusive")
+	}
+
+	// Determine strategy (default: theirs)
+	strategy := "theirs"
+	if pullOurs {
+		strategy = "ours"
+	} else if pullShowDiff {
+		strategy = "diff"
+	}
+
 	paths := config.GetPaths()
 
 	// Check prerequisites
@@ -61,6 +97,11 @@ func runPull(cmd *cobra.Command, args []string) error {
 		if err := g.Pull(); err != nil {
 			logWarn(fmt.Sprintf("Pull failed: %v", err))
 			logWarn("You may need to resolve conflicts manually.")
+
+			// Show age of local repo when pull fails
+			if age := getRepoAge(paths.RepoDir); age != "" {
+				logWarn(fmt.Sprintf("Using cached files from: %s", age))
+			}
 		}
 	}
 
@@ -86,6 +127,10 @@ func runPull(cmd *cobra.Command, args []string) error {
 
 	if pullDryRun {
 		logInfo("[DRY RUN] Would restore the following files:")
+	} else if strategy == "diff" {
+		logInfo("Comparing local vs remote (no changes will be applied):")
+	} else if strategy == "ours" {
+		logInfo("Pulling with --ours: keeping local files where they differ")
 	} else {
 		logInfo("Restoring files...")
 	}
@@ -111,6 +156,12 @@ func runPull(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
+		// Skip platform variants for other platforms
+		// e.g., on Windows, skip .unix.md files; on Unix, skip .windows.md files
+		if sync.ShouldSkipForPlatform(basePath) {
+			continue
+		}
+
 		var dest string
 		actualRelPath := relPath
 
@@ -127,22 +178,36 @@ func runPull(cmd *cobra.Command, args []string) error {
 
 			if pullDryRun {
 				logInfo(fmt.Sprintf("  [decrypt] %s", actualRelPath))
-			} else {
-				// Backup if different
+			} else if strategy == "diff" {
+				// Show diff for encrypted files (decrypt to temp, compare)
 				if sync.FileExists(dest) {
-					// TODO: compare content before backing up
-					backupPath, _ := sync.BackupFile(dest)
-					if backupPath != "" {
-						logWarn(fmt.Sprintf("Conflict: backing up %s", actualRelPath))
-					}
+					logInfo(fmt.Sprintf("  [encrypted] %s (local exists, remote differs)", actualRelPath))
+				} else {
+					logInfo(fmt.Sprintf("  [encrypted] %s (new file)", actualRelPath))
 				}
+			} else {
+				// Check if local exists and differs
+				localExists := sync.FileExists(dest)
 
-				logInfo(fmt.Sprintf("Decrypting: %s", actualRelPath))
-				if err := sync.EnsureDir(filepath.Dir(dest)); err != nil {
-					return err
-				}
-				if err := crypto.DecryptFile(identity, file, dest); err != nil {
-					return fmt.Errorf("failed to decrypt %s: %w", actualRelPath, err)
+				if localExists && strategy == "ours" {
+					// Keep local, skip remote
+					logInfo(fmt.Sprintf("Keeping local: %s", actualRelPath))
+				} else {
+					// theirs strategy: backup and apply
+					if localExists {
+						backupPath, _ := sync.BackupFile(dest)
+						if backupPath != "" {
+							logWarn(fmt.Sprintf("Conflict: backing up %s", actualRelPath))
+						}
+					}
+
+					logInfo(fmt.Sprintf("Decrypting: %s", actualRelPath))
+					if err := sync.EnsureDir(filepath.Dir(dest)); err != nil {
+						return err
+					}
+					if err := crypto.DecryptFile(identity, file, dest); err != nil {
+						return fmt.Errorf("failed to decrypt %s: %w", actualRelPath, err)
+					}
 				}
 			}
 		} else {
@@ -151,21 +216,42 @@ func runPull(cmd *cobra.Command, args []string) error {
 			if pullDryRun {
 				logInfo(fmt.Sprintf("  [copy] %s", relPath))
 			} else {
-				// Backup if different
-				if sync.FileExists(dest) {
+				// Check if local exists and differs
+				localExists := sync.FileExists(dest)
+				var differs bool
+				if localExists {
 					srcHash, _ := sync.FileChecksum(file)
 					dstHash, _ := sync.FileChecksum(dest)
-					if srcHash != dstHash {
+					differs = srcHash != dstHash
+				}
+
+				if strategy == "diff" {
+					// Show diff
+					if !localExists {
+						logInfo(fmt.Sprintf("  [new] %s", relPath))
+					} else if differs {
+						logInfo(fmt.Sprintf("  [changed] %s", relPath))
+						showFileDiff(dest, file, relPath)
+					} else {
+						// Same content, skip
+						continue
+					}
+				} else if localExists && differs && strategy == "ours" {
+					// Keep local, skip remote
+					logInfo(fmt.Sprintf("Keeping local: %s", relPath))
+				} else if !localExists || differs {
+					// theirs strategy: backup and apply
+					if localExists && differs {
 						backupPath, _ := sync.BackupFile(dest)
 						if backupPath != "" {
 							logWarn(fmt.Sprintf("Conflict: backing up %s", relPath))
 						}
 					}
-				}
 
-				logInfo(fmt.Sprintf("Copying: %s", relPath))
-				if err := sync.CopyFile(file, dest); err != nil {
-					return fmt.Errorf("failed to copy %s: %w", relPath, err)
+					logInfo(fmt.Sprintf("Copying: %s", relPath))
+					if err := sync.CopyFile(file, dest); err != nil {
+						return fmt.Errorf("failed to copy %s: %w", relPath, err)
+					}
 				}
 			}
 		}
@@ -174,6 +260,11 @@ func runPull(cmd *cobra.Command, args []string) error {
 
 	if pullDryRun {
 		logInfo(fmt.Sprintf("[DRY RUN] Would restore %d files", count))
+	} else if strategy == "diff" {
+		logInfo(fmt.Sprintf("Diff complete. %d files would be affected.", count))
+		logInfo("Run 'sync pull' to apply changes, or 'sync pull --ours' to keep local.")
+	} else if strategy == "ours" {
+		logSuccess(fmt.Sprintf("Pull complete (--ours)! Kept local versions, %d files checked.", count))
 	} else {
 		// Expand cross-platform path placeholders to local paths
 		if err := expandPluginPaths(paths.ClaudeDir); err != nil {
@@ -184,6 +275,57 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// showFileDiff displays a simple diff between local and remote files
+func showFileDiff(localPath, remotePath, relPath string) {
+	localData, err := os.ReadFile(localPath)
+	if err != nil {
+		return
+	}
+	remoteData, err := os.ReadFile(remotePath)
+	if err != nil {
+		return
+	}
+
+	localLines := strings.Split(string(localData), "\n")
+	remoteLines := strings.Split(string(remoteData), "\n")
+
+	// Simple diff: show line count difference and first few differing lines
+	fmt.Printf("    Local:  %d lines\n", len(localLines))
+	fmt.Printf("    Remote: %d lines\n", len(remoteLines))
+
+	// Find first difference
+	maxLines := len(localLines)
+	if len(remoteLines) > maxLines {
+		maxLines = len(remoteLines)
+	}
+
+	diffCount := 0
+	for i := 0; i < maxLines && diffCount < 3; i++ {
+		var localLine, remoteLine string
+		if i < len(localLines) {
+			localLine = localLines[i]
+		}
+		if i < len(remoteLines) {
+			remoteLine = remoteLines[i]
+		}
+		if localLine != remoteLine {
+			diffCount++
+			if len(localLine) > 60 {
+				localLine = localLine[:60] + "..."
+			}
+			if len(remoteLine) > 60 {
+				remoteLine = remoteLine[:60] + "..."
+			}
+			fmt.Printf("    Line %d:\n", i+1)
+			fmt.Printf("      - %s\n", localLine)
+			fmt.Printf("      + %s\n", remoteLine)
+		}
+	}
+	if diffCount == 0 {
+		fmt.Println("    (content differs but no line-by-line diff available)")
+	}
 }
 
 // expandPluginPaths converts cross-platform placeholders to local platform paths
@@ -328,4 +470,45 @@ func pruneBackups(backupDir string, maxCount int) error {
 	}
 
 	return nil
+}
+
+// getRepoAge returns a human-readable string showing when the repo was last updated
+func getRepoAge(repoDir string) string {
+	// Get last commit timestamp using git log
+	cmd := exec.Command("git", "-C", repoDir, "log", "-1", "--format=%ai")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	timestampStr := strings.TrimSpace(string(output))
+	if timestampStr == "" {
+		return ""
+	}
+
+	// Parse timestamp (format: "2025-12-19 21:22:01 +0800")
+	// Use only the date+time part, ignore timezone
+	parts := strings.Fields(timestampStr)
+	if len(parts) < 2 {
+		return ""
+	}
+	dateTimeStr := parts[0] + " " + parts[1]
+
+	lastCommit, err := time.Parse("2006-01-02 15:04:05", dateTimeStr)
+	if err != nil {
+		return ""
+	}
+
+	age := time.Since(lastCommit)
+
+	// Format based on age
+	if age < time.Hour {
+		return fmt.Sprintf("minutes ago (%s)", lastCommit.Format("2006-01-02 15:04"))
+	} else if age < 24*time.Hour {
+		hours := int(age.Hours())
+		return fmt.Sprintf("%d hour(s) ago (%s)", hours, lastCommit.Format("2006-01-02 15:04"))
+	} else {
+		days := int(age.Hours() / 24)
+		return fmt.Sprintf("%d day(s) ago (%s)", days, lastCommit.Format("2006-01-02"))
+	}
 }
