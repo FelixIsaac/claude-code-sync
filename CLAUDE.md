@@ -161,3 +161,10 @@ GitHub Actions (`.github/workflows/release.yaml`) runs goreleaser:
 - No custom encrypt/exclude patterns (hardcoded in `config.go`)
 - No lock file (concurrent operations possible but risky)
 - Shells out to git (requires git in PATH)
+
+## Next Release: v0.3.0
+
+New features to test before release:
+- `pull --ours/--theirs/--diff` - conflict handling strategies
+- `push --no-platform-check` - platform detection warnings
+- Platform variant support (`.windows.md`/`.unix.md` suffixes)
