@@ -70,6 +70,9 @@ var DefaultExcludePatterns = []string{
 	"shell-snapshots",
 	"telemetry",
 	"sessionStorage",
+	"node_modules",
+	"paste-cache",
+	"image-cache",
 	// Files
 	"history.jsonl",
 	"stats-cache.json",
@@ -151,6 +154,10 @@ func (c *Config) ShouldExclude(relPath string) bool {
 		} else {
 			// Directory/file name - match if relPath starts with pattern/ or equals pattern
 			if relPathNorm == patternLower || strings.HasPrefix(relPathNorm, patternLower+"/") {
+				return true
+			}
+			// Match pattern as a path component anywhere in the path (e.g. .git in nested dirs)
+			if strings.Contains(relPathNorm, "/"+patternLower+"/") || strings.HasSuffix(relPathNorm, "/"+patternLower) {
 				return true
 			}
 			// Exact filename match

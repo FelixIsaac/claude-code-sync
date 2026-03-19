@@ -37,14 +37,28 @@ func FileChecksum(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// WalkFiles walks a directory and returns all file paths
+// WalkFiles walks a directory and returns all file paths, skipping symlinks and irregular files
 func WalkFiles(root string) ([]string, error) {
 	var files []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
+		// Skip symlinks: check both the symlink bit and irregular files
+		// On Windows, os.Lstat may not set ModeSymlink for junction points,
+		// so also skip files that are neither regular files nor directories
+		linfo, lerr := os.Lstat(path)
+		if lerr != nil {
+			return nil
+		}
+		mode := linfo.Mode()
+		if mode&os.ModeSymlink != 0 {
+			return nil
+		}
 		if !info.IsDir() {
+			if !mode.IsRegular() {
+				return nil
+			}
 			files = append(files, path)
 		}
 		return nil
