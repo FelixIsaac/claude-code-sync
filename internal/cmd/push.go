@@ -124,6 +124,11 @@ func runPush(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Generate README.md for the sync repo
+	if err := writeRepoReadme(paths.RepoDir); err != nil {
+		logWarn(fmt.Sprintf("Failed to write README.md: %v", err))
+	}
+
 	// Normalize paths in plugin config files for cross-platform compatibility
 	if err := normalizePluginPaths(paths.RepoDir, paths.ClaudeDir); err != nil {
 		logWarn(fmt.Sprintf("Failed to normalize plugin paths: %v", err))
@@ -195,6 +200,40 @@ func runPush(cmd *cobra.Command, args []string) error {
 
 	logSuccess("Push complete!")
 	return nil
+}
+
+// writeRepoReadme generates a README.md explaining the sync repo contents
+func writeRepoReadme(repoDir string) error {
+	readme := `# Claude Code Config Sync
+
+This repo is managed by [claude-code-sync](https://github.com/FelixIsaac/claude-code-sync). Do not edit files here directly — changes will be overwritten on the next push.
+
+## What's in here
+
+| Path | Description |
+|------|-------------|
+| ` + "`CLAUDE.md`" + ` | Global instructions loaded into every Claude Code session |
+| ` + "`commands/`" + ` | Custom slash commands (` + "`/command-name`" + `) |
+| ` + "`agents/`" + ` | Custom subagent definitions |
+| ` + "`skills/`" + ` | Agent skills (auto-invoked by Claude) |
+| ` + "`hooks/`" + ` | Hook scripts |
+| ` + "`plugins/`" + ` | Installed plugins |
+| ` + "`*.age`" + ` | Encrypted files (settings, credentials, OAuth tokens) |
+| ` + "`.sync-manifest`" + ` | SHA256 checksums for integrity verification |
+
+## Usage
+
+` + "```bash" + `
+# Push local configs to this repo
+claude-code-sync push
+
+# Pull configs from this repo to local
+claude-code-sync pull
+` + "```" + `
+
+Encrypted files require the age private key (` + "`~/.claude-sync/identity.key`" + `) to decrypt.
+`
+	return os.WriteFile(filepath.Join(repoDir, "README.md"), []byte(readme), 0644)
 }
 
 // normalizePluginPaths converts platform-specific paths to cross-platform placeholders
