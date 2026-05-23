@@ -73,13 +73,23 @@ var DefaultExcludePatterns = []string{
 	"node_modules",
 	"paste-cache",
 	"image-cache",
+	"backups",      // auto .claude.json snapshots created by CC — redundant with claude.json.age
+	"cache",        // CC update/summary cache
+	"chrome",       // machine-specific Chrome native host
+	"daemon",       // machine-specific pipe key
+	"session-env",  // per-invocation env snapshots (14k+ files)
+	"temp",         // temporary files
 	// Files
 	"history.jsonl",
 	"stats-cache.json",
+	"mcp-needs-auth-cache.json", // ephemeral MCP auth state
+	"scheduled_tasks.lock",      // runtime lock file
+	".last-cleanup",             // timestamp marker
 	"*.log",
 	"*.tmp",
 	"*.cache",
 	"*.local-backup-*",
+	"*.lock",
 	".git",
 }
 

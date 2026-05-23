@@ -69,7 +69,8 @@ func (g *Git) AddAll() error {
 
 // Commit creates a commit with the given message
 func (g *Git) Commit(message string) error {
-	_, err := g.run("commit", "-m", message)
+	// -c commit.gpgsign=false avoids failures on machines with GPG signing enabled globally
+	_, err := g.run("-c", "commit.gpgsign=false", "commit", "-m", message)
 	return err
 }
 
