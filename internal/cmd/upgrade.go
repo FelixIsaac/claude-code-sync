@@ -33,127 +33,30 @@ type githubRelease struct {
 	} `json:"assets"`
 }
 
-var checkUpdateCmd = &cobra.Command{
-	Use:   "check-update",
-	Short: "Check for newer version",
-	RunE:  runCheckUpdate,
-}
+var (
+	upgradeAutoConfirm bool
+	upgradeCheckOnly   bool
+)
 
-var updateCmd = &cobra.Command{
-	Use:   "update",
-	Short: "Download and install latest version",
-	RunE:  runUpdate,
-}
+// upgradeCmd handles checking and installing updates
+var upgradeCmd = &cobra.Command{
+	Use:   "upgrade",
+	Short: "Check for updates and install latest version",
+	Long: `Check for a newer version and optionally install it.
 
-var updateAutoConfirm bool
+Examples:
+  claude-code-sync upgrade           # Check and prompt to install
+  claude-code-sync upgrade --check   # Check only, don't install
+  claude-code-sync upgrade --yes     # Auto-confirm installation`,
+	RunE: runUpgrade,
+}
 
 func init() {
-	updateCmd.Flags().BoolVarP(&updateAutoConfirm, "yes", "y", false, "Auto-confirm update without prompting")
+	upgradeCmd.Flags().BoolVarP(&upgradeAutoConfirm, "yes", "y", false, "Auto-confirm update without prompting")
+	upgradeCmd.Flags().BoolVar(&upgradeCheckOnly, "check", false, "Check for updates only, don't install")
 }
 
-func runCheckUpdate(cmd *cobra.Command, args []string) error {
-	logInfo("Checking for updates...")
-
-	latest, err := getLatestRelease()
-	if err != nil {
-		return fmt.Errorf("failed to check for updates: %w", err)
-	}
-
-	latestVer := strings.TrimPrefix(latest.TagName, "v")
-	currentVer := version
-
-	if latestVer == currentVer {
-		logSuccess(fmt.Sprintf("You're on the latest version (v%s)", currentVer))
-		return nil
-	}
-
-	// Simple version comparison (works for semver)
-	if compareVersions(latestVer, currentVer) > 0 {
-		fmt.Println()
-		color.Yellow("Update available: v%s → v%s", currentVer, latestVer)
-		fmt.Println()
-		fmt.Println("Download:")
-		fmt.Printf("  %s\n", latest.HTMLURL)
-		fmt.Println()
-
-		// Show direct download link for current platform
-		assetName := getAssetName()
-		for _, asset := range latest.Assets {
-			if asset.Name == assetName {
-				fmt.Println("Direct download for your platform:")
-				fmt.Printf("  %s\n", asset.BrowserDownloadURL)
-				break
-			}
-		}
-		fmt.Println()
-		logInfo("To update: download and replace your current binary")
-	} else {
-		logSuccess(fmt.Sprintf("You're on the latest version (v%s)", currentVer))
-	}
-
-	return nil
-}
-
-func getLatestRelease() (*githubRelease, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", repoOwner, repoName)
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 404 {
-		return nil, fmt.Errorf("no releases found")
-	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
-	}
-
-	var release githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, err
-	}
-
-	return &release, nil
-}
-
-func getAssetName() string {
-	os := runtime.GOOS
-	arch := runtime.GOARCH
-
-	ext := ".tar.gz"
-	if os == "windows" {
-		ext = ".zip"
-	}
-
-	return fmt.Sprintf("claude-code-sync_%s_%s%s", os, arch, ext)
-}
-
-// compareVersions returns >0 if a > b, <0 if a < b, 0 if equal
-func compareVersions(a, b string) int {
-	aParts := strings.Split(a, ".")
-	bParts := strings.Split(b, ".")
-
-	for i := 0; i < len(aParts) && i < len(bParts); i++ {
-		var aNum, bNum int
-		fmt.Sscanf(aParts[i], "%d", &aNum)
-		fmt.Sscanf(bParts[i], "%d", &bNum)
-
-		if aNum > bNum {
-			return 1
-		}
-		if aNum < bNum {
-			return -1
-		}
-	}
-
-	return len(aParts) - len(bParts)
-}
-
-// runUpdate handles the automatic update flow
-func runUpdate(cmd *cobra.Command, args []string) error {
+func runUpgrade(cmd *cobra.Command, args []string) error {
 	logInfo("Checking for updates...")
 
 	// Check for latest release
@@ -165,16 +68,48 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	latestVer := strings.TrimPrefix(latest.TagName, "v")
 	currentVer := version
 
-	// Check if update is needed
+	// Check if update is available
 	if compareVersions(latestVer, currentVer) <= 0 {
 		logSuccess(fmt.Sprintf("Already on latest version (v%s)", currentVer))
 		return nil
 	}
 
+	fmt.Println()
+	color.Yellow("Update available: v%s → v%s", currentVer, latestVer)
+	fmt.Println()
+
+	// Show download info
+	fmt.Println("Release page:")
+	fmt.Printf("  %s\n", latest.HTMLURL)
+	fmt.Println()
+
+	// Show direct download link for current platform
+	assetName := getAssetName()
+	var downloadURL string
+	for _, asset := range latest.Assets {
+		if asset.Name == assetName {
+			downloadURL = asset.BrowserDownloadURL
+			fmt.Println("Direct download for your platform:")
+			fmt.Printf("  %s\n", asset.BrowserDownloadURL)
+			break
+		}
+	}
+
+	// If check-only, stop here
+	if upgradeCheckOnly {
+		fmt.Println()
+		logInfo("Run 'claude-code-sync upgrade' to install")
+		return nil
+	}
+
+	if downloadURL == "" {
+		return fmt.Errorf("no binary available for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
 	// Prompt user unless --yes flag
-	if !updateAutoConfirm {
-		fmt.Printf("Update available: v%s → v%s\n", currentVer, latestVer)
-		fmt.Printf("Update to v%s? [Y/n]: ", latestVer)
+	if !upgradeAutoConfirm {
+		fmt.Println()
+		fmt.Printf("Install v%s now? [Y/n]: ", latestVer)
 
 		reader := bufio.NewReader(os.Stdin)
 		response, err := reader.ReadString('\n')
@@ -189,20 +124,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get asset info
-	assetName := getAssetName()
-	var downloadURL string
-	for _, asset := range latest.Assets {
-		if asset.Name == assetName {
-			downloadURL = asset.BrowserDownloadURL
-			break
-		}
-	}
-
-	if downloadURL == "" {
-		return fmt.Errorf("no binary available for %s/%s", runtime.GOOS, runtime.GOARCH)
-	}
-
+	// Download
 	logInfo(fmt.Sprintf("Downloading %s...", assetName))
 	tmpFile, err := downloadToTemp(downloadURL)
 	if err != nil {
@@ -251,6 +173,64 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	logSuccess(fmt.Sprintf("Updated to v%s!", latestVer))
 	return nil
+}
+
+func getLatestRelease() (*githubRelease, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", repoOwner, repoName)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return nil, fmt.Errorf("no releases found")
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
+	}
+
+	var release githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, err
+	}
+
+	return &release, nil
+}
+
+func getAssetName() string {
+	osName := runtime.GOOS
+	arch := runtime.GOARCH
+
+	ext := ".tar.gz"
+	if osName == "windows" {
+		ext = ".zip"
+	}
+
+	return fmt.Sprintf("claude-code-sync_%s_%s%s", osName, arch, ext)
+}
+
+// compareVersions returns >0 if a > b, <0 if a < b, 0 if equal
+func compareVersions(a, b string) int {
+	aParts := strings.Split(a, ".")
+	bParts := strings.Split(b, ".")
+
+	for i := 0; i < len(aParts) && i < len(bParts); i++ {
+		var aNum, bNum int
+		fmt.Sscanf(aParts[i], "%d", &aNum)
+		fmt.Sscanf(bParts[i], "%d", &bNum)
+
+		if aNum > bNum {
+			return 1
+		}
+		if aNum < bNum {
+			return -1
+		}
+	}
+
+	return len(aParts) - len(bParts)
 }
 
 // downloadToTemp downloads a file from URL to a temp file
@@ -389,7 +369,7 @@ func checkWritePermission(binaryPath string) error {
 
 	if err := os.WriteFile(tmpFile, []byte("test"), 0644); err != nil {
 		if runtime.GOOS != "windows" {
-			return fmt.Errorf("try: sudo %s update", os.Args[0])
+			return fmt.Errorf("try: sudo %s upgrade", os.Args[0])
 		}
 		return err
 	}

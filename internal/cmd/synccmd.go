@@ -9,14 +9,46 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var verifyCmd = &cobra.Command{
-	Use:   "verify",
-	Short: "Verify file integrity",
-	Long:  `Verify file integrity using SHA256 checksums from the manifest.`,
-	RunE:  runVerify,
+// syncCmd is the parent command for sync utilities
+var syncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Advanced sync operations",
+	Long: `Advanced sync operation commands.
+
+Subcommands:
+  verify      Verify file integrity using checksums
+  conflicts   Resolve merge conflicts (coming soon)`,
 }
 
-func runVerify(cmd *cobra.Command, args []string) error {
+// syncVerifyCmd verifies file integrity
+var syncVerifyCmd = &cobra.Command{
+	Use:   "verify",
+	Short: "Verify file integrity using checksums",
+	Long:  `Verify file integrity by comparing SHA256 checksums against the manifest.`,
+	RunE:  runSyncVerify,
+}
+
+// syncConflictsCmd resolves conflicts (placeholder)
+var syncConflictsCmd = &cobra.Command{
+	Use:   "conflicts",
+	Short: "Resolve merge conflicts (coming soon)",
+	Long:  `Interactive conflict resolution for merge conflicts.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		logWarn("Conflict resolution is coming soon.")
+		fmt.Println()
+		fmt.Println("For now, manually resolve conflicts in:")
+		paths := config.GetPaths()
+		fmt.Printf("  %s\n", toUnixPath(paths.RepoDir))
+		return nil
+	},
+}
+
+func init() {
+	syncCmd.AddCommand(syncVerifyCmd)
+	syncCmd.AddCommand(syncConflictsCmd)
+}
+
+func runSyncVerify(cmd *cobra.Command, args []string) error {
 	paths := config.GetPaths()
 	manifestPath := filepath.Join(paths.RepoDir, ".sync-manifest")
 

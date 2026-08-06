@@ -2,6 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"net"
+	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/felixisaac/claude-code-sync/internal/config"
@@ -79,6 +83,28 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		color.Yellow("N/A")
 	}
 
+	// Check GitHub connectivity
+	fmt.Print("GitHub connectivity: ")
+	if canReachGitHub() {
+		color.Green("OK")
+	} else {
+		color.Yellow("UNREACHABLE - no internet or blocked")
+	}
+
+	// Check GitHub CLI
+	fmt.Print("GitHub CLI: ")
+	if isGitHubCLIInstalled() {
+		color.Green("OK")
+		ghStatus := getGitHubAuthStatus()
+		if ghStatus != "" {
+			fmt.Printf("  → Logged in as: %s\n", ghStatus)
+		} else {
+			fmt.Printf("  → Status: Not authenticated\n")
+		}
+	} else {
+		color.Yellow("NOT INSTALLED (optional)")
+	}
+
 	// Check claude directory
 	fmt.Print("Claude directory: ")
 	if sync.FileExists(paths.ClaudeDir) {
@@ -103,4 +129,40 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// canReachGitHub checks if github.com is reachable
+func canReachGitHub() bool {
+	conn, err := net.DialTimeout("tcp", "github.com:443", 3*time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// isGitHubCLIInstalled checks if GitHub CLI is available
+func isGitHubCLIInstalled() bool {
+	cmd := exec.Command("gh", "--version")
+	return cmd.Run() == nil
+}
+
+// getGitHubAuthStatus returns the logged-in GitHub account name, or empty string if not logged in
+func getGitHubAuthStatus() string {
+	cmd := exec.Command("gh", "auth", "status")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return ""
+	}
+
+	outStr := string(output)
+	if strings.Contains(outStr, "Logged in to github.com as") {
+		parts := strings.Split(outStr, "as ")
+		if len(parts) > 1 {
+			username := strings.Fields(parts[1])[0]
+			return strings.TrimSpace(username)
+		}
+	}
+
+	return ""
 }

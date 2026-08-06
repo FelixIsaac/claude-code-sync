@@ -193,3 +193,15 @@ func (g *Git) CreateInitialCommit() error {
 
 	return g.Commit("Initial commit")
 }
+
+// GetRemoteURL returns the URL of the origin remote
+func (g *Git) GetRemoteURL() string {
+	url, _ := g.runSilent("remote", "get-url", "origin")
+	return url
+}
+
+// SetRemoteURL sets the URL of the origin remote
+func (g *Git) SetRemoteURL(url string) error {
+	_, err := g.run("remote", "set-url", "origin", url)
+	return err
+}

@@ -18,22 +18,67 @@ func toUnixPath(path string) string {
 	return strings.ReplaceAll(path, "\\", "/")
 }
 
-var initCmd = &cobra.Command{
+var (
+	configLocalOnly    bool
+	configInteractive  bool
+)
+
+// configCmd is the parent command for config subcommands
+var configCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Configuration and initialization",
+	Long: `Configuration and initialization commands.
+
+Subcommands:
+  init    Initialize sync (generate keys, clone/create repo)
+  repo    Show or update repository URL`,
+}
+
+// configInitCmd initializes sync
+var configInitCmd = &cobra.Command{
 	Use:   "init [repo-url]",
 	Short: "Initialize sync (generate keys, clone/create repo)",
 	Long: `Initialize claude-code-sync for this machine.
 
 If no repo URL is provided, creates a local repo that you can later
-connect to a remote with: git -C ~/.claude-sync/repo remote add origin <url>`,
+connect to a remote with: git -C ~/.claude-sync/repo remote add origin <url>
+
+Use --interactive for a guided setup wizard (coming soon).`,
 	Args: cobra.MaximumNArgs(1),
-	RunE: runInit,
+	RunE: runConfigInit,
 }
 
-func runInit(cmd *cobra.Command, args []string) error {
+// configRepoCmd shows or updates repo URL
+var configRepoCmd = &cobra.Command{
+	Use:   "repo [new-url]",
+	Short: "Show or update repository URL",
+	Long: `Show the current repository URL, or set a new one.
+
+Examples:
+  claude-code-sync config repo                           # Show current URL
+  claude-code-sync config repo git@github.com:u/r.git   # Set new URL`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runConfigRepo,
+}
+
+func init() {
+	configInitCmd.Flags().BoolVar(&configLocalOnly, "local", false, "Create local repo only (no remote)")
+	configInitCmd.Flags().BoolVar(&configInteractive, "interactive", false, "Use interactive setup wizard")
+
+	configCmd.AddCommand(configInitCmd)
+	configCmd.AddCommand(configRepoCmd)
+}
+
+func runConfigInit(cmd *cobra.Command, args []string) error {
 	paths := config.GetPaths()
 	repoURL := ""
 	if len(args) > 0 {
 		repoURL = args[0]
+	}
+
+	// TODO: Add interactive wizard support
+	if configInteractive {
+		logWarn("Interactive wizard coming soon. Using standard init flow.")
 	}
 
 	logInfo("Initializing claude-code-sync...")
@@ -137,5 +182,46 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	logSuccess("Initialization complete!")
+	return nil
+}
+
+func runConfigRepo(cmd *cobra.Command, args []string) error {
+	paths := config.GetPaths()
+	g := git.New(paths.RepoDir)
+
+	if !g.IsRepo() {
+		return fmt.Errorf("no repository found. Run 'claude-code-sync config init' first")
+	}
+
+	if len(args) == 0 {
+		// Show current URL
+		url := g.GetRemoteURL()
+		if url == "" {
+			logWarn("No remote URL configured")
+			fmt.Println()
+			fmt.Println("To add a remote:")
+			fmt.Printf("  claude-code-sync config repo git@github.com:user/repo.git\n")
+		} else {
+			fmt.Printf("Repository: %s\n", url)
+		}
+		return nil
+	}
+
+	// Set new URL
+	newURL := args[0]
+	if !git.IsValidRepoURL(newURL) {
+		return fmt.Errorf("invalid repo URL: %s", newURL)
+	}
+
+	logInfo("Verifying new URL...")
+	if err := git.CheckRemote(newURL); err != nil {
+		return fmt.Errorf("cannot access repo: %w", err)
+	}
+
+	if err := g.SetRemoteURL(newURL); err != nil {
+		return fmt.Errorf("failed to set remote URL: %w", err)
+	}
+
+	logSuccess(fmt.Sprintf("Repository URL updated to: %s", newURL))
 	return nil
 }

@@ -13,21 +13,42 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var importKeyCmd = &cobra.Command{
-	Use:   "import-key",
-	Short: "Import private key on new machine",
-	Long:  `Import your age private key to set up sync on a new machine.`,
-	RunE:  runImportKey,
+// keyCmd is the parent command for key management
+var keyCmd = &cobra.Command{
+	Use:   "key",
+	Short: "Encryption key management",
+	Long: `Encryption key management commands.
+
+Subcommands:
+  import    Import private key from another machine
+  export    Display private key for backup`,
 }
 
-var exportKeyCmd = &cobra.Command{
-	Use:   "export-key",
+// keyImportCmd imports a private key
+var keyImportCmd = &cobra.Command{
+	Use:   "import",
+	Short: "Import private key from another machine",
+	Long: `Import your age private key to set up sync on a new machine.
+
+The key starts with AGE-SECRET-KEY- and was shown during init.
+You can also include the comment line with the public key.`,
+	RunE: runKeyImport,
+}
+
+// keyExportCmd exports the private key
+var keyExportCmd = &cobra.Command{
+	Use:   "export",
 	Short: "Display private key for backup",
-	Long:  `Display your private key so you can save it securely.`,
-	RunE:  runExportKey,
+	Long:  `Display your private key so you can save it securely or import on another machine.`,
+	RunE:  runKeyExport,
 }
 
-func runImportKey(cmd *cobra.Command, args []string) error {
+func init() {
+	keyCmd.AddCommand(keyImportCmd)
+	keyCmd.AddCommand(keyExportCmd)
+}
+
+func runKeyImport(cmd *cobra.Command, args []string) error {
 	paths := config.GetPaths()
 
 	if err := sync.EnsureDir(paths.SyncDir); err != nil {
@@ -77,11 +98,11 @@ func runImportKey(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runExportKey(cmd *cobra.Command, args []string) error {
+func runKeyExport(cmd *cobra.Command, args []string) error {
 	paths := config.GetPaths()
 
 	if !sync.FileExists(paths.KeyFile) {
-		return fmt.Errorf("no key found. Run 'claude-code-sync init' first")
+		return fmt.Errorf("no key found. Run 'claude-code-sync config init' first")
 	}
 
 	content, err := os.ReadFile(paths.KeyFile)
